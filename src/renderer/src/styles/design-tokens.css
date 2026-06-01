@@ -1,0 +1,19 @@
+/* ============================================
+   vibe-monitor design tokens
+   仅保留灵动岛 / 审批面板实际引用的 5 个变量（其余历史主题变量已裁掉）。
+   ============================================ */
+
+:root {
+  /* 字体 */
+  --font-ui:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Helvetica,
+    Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, monospace;
+
+  /* 圆角 */
+  --radius-sm: 4px;
+
+  /* 复制成功态（CopyableField） */
+  --color-success: #16a34a;
+  --color-success-border: #15803d;
+}

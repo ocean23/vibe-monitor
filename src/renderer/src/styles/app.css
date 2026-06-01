@@ -1,0 +1,633 @@
+/* ============================================
+   vibe-monitor — 灵动岛独立壳样式
+   透明置顶刘海窗口：仅承载 IslandRoot
+   ============================================ */
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+}
+body {
+  font-family: var(--font-ui);
+  /* 透明窗口：无内容时不画底色，由 island-body 显式置透明 */
+  background: transparent;
+}
+
+/* ---- CopyableField（审批面板长字段复制） ---- */
+.copyable-field {
+  position: relative;
+}
+.copyable-field-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  opacity: 0;
+  transition:
+    opacity 0.15s,
+    background 0.15s;
+  background: rgba(40, 40, 40, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #d4d4d4;
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  z-index: 1;
+}
+.copyable-field:hover .copyable-field-btn,
+.copyable-field-btn:focus-visible {
+  opacity: 1;
+}
+.copyable-field[data-state='copied'] .copyable-field-btn {
+  opacity: 1;
+  color: var(--color-success);
+  border-color: var(--color-success-border);
+}
+
+/* ---- LogHighlight（审批面板命令预览） ---- */
+.log-highlight {
+  margin: 0;
+  padding: 6px 8px;
+  background: #1e1e1e;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  /* 显式基准色，避免父级 color 继承链断裂 */
+  color: #d4d4d4;
+  overflow: auto;
+  max-height: 360px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.log-highlight.empty {
+  min-height: 1.4em;
+  padding: 0;
+  background: transparent;
+}
+
+/* ---- Log syntax tokens (lh-*) ----------------------------------------- */
+/* 配色对齐 VS Code LogFileHighlighter + One Dark Pro 深色主题。 */
+.lh-ts {
+  color: #4ec994;
+}
+.lh-fatal {
+  color: #e06c75;
+  font-weight: 700;
+}
+.lh-error {
+  color: #e06c75;
+}
+.lh-warn {
+  color: #e5c07b;
+}
+.lh-info {
+  color: #61afef;
+}
+.lh-debug {
+  color: #56b6c2;
+}
+.lh-trace {
+  color: #aaaaaa;
+}
+.lh-caused-by {
+  color: #e06c75;
+  font-weight: 700;
+}
+.lh-stack {
+  color: #858585;
+}
+.lh-exception {
+  color: #e06c75;
+  font-style: italic;
+}
+.lh-url {
+  color: #61afef;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.lh-uuid {
+  color: #aaaaaa;
+}
+.lh-ip {
+  color: #d19a66;
+}
+.lh-num {
+  color: #d19a66;
+}
+.lh-key {
+  color: #61afef;
+}
+.lh-str {
+  color: #98c379;
+}
+
+/* ============================================
+   灵动岛 (Notch Island)
+   独立 #island 窗口：透明背景 + 深色浮层（不随白色内容区主题）
+   ============================================ */
+
+/* 透明窗口：body 去掉白色底，#island 窗口才贴合刘海 */
+body.island-body {
+  background: transparent !important;
+}
+
+.island-root {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  -webkit-app-region: no-drag;
+  /* 岛内深色浮层用自有配色，不继承白色内容区文字色 */
+  color: #e8e8ea;
+  font-family: var(--font-ui);
+  /* 岛体统一表面色：与刘海/Dynamic Island 硬件纯黑完全一致 */
+  --island-surface: #000000;
+  /* 以下刘海几何变量由渲染端运行时从主进程注入（见 Island.tsx）；
+     此处默认值仅用于无法检测刘海时（非刘海机型）的顶部宽条降级。 */
+  --notch-h: 38px; /* 黑条高（= 刘海实高 / 菜单栏高，运行时由主进程注入；本机 38pt） */
+  --bar-radius: 10px; /* 黑条底-左凸圆角半径（运行时由主进程注入 cornerRadius） */
+  --bar-overlap: 28px; /* 黑条右端钻进刘海背后的像素（内容右 padding 让位） */
+  --bar-shoulder: 3px; /* 左上椭圆凹肩「水平」半径（= 左侧透明预留宽；极小→几乎不外扩） */
+  --bar-shoulder-h: 10px; /* 左上椭圆凹肩「垂直」半径（> 水平半径 → 仅顶部一点点圆，仿原生右肩） */
+  --notch-topinset: 0px; /* 展开态面板上方透明占位高（= 完整菜单栏高） */
+}
+
+.island-content {
+  width: 100%;
+}
+
+/* ---- 展开态刘海占位 ---- */
+/* 面板上方的透明占位：高度 = 刘海高（topInset），让面板从刘海正下方弹出，
+   而非藏在刘海背后（刘海背后无像素，会被物理摄像头模组遮挡）。 */
+.island-notch-spacer {
+  height: var(--notch-topinset, 0px);
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+/* ---- 收起态 pill（非刘海降级：屏幕顶部居中黑条） ---- */
+.island-pill {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 38px;
+  margin: 0;
+  padding: 0 16px;
+  background: var(--island-surface);
+  border-radius: 0 0 14px 14px;
+  font-size: 12px;
+}
+
+/* ---- 收起态 pill（刘海机型：贴刘海左侧、与刘海等高、连成长方形的黑条） ---- */
+/* 纯黑实心主体：左缘从 shoulder 之后起（左侧 shoulder 宽透明区留给凹形肩），向右铺满整窗
+   （含钻进刘海背后的 overlap 段）。
+   顶边平直齐 y=0、顶角直角贴屏幕黑边框（顶角做圆角会露蓝缝，截图实测过）；右缘直角插进
+   刘海背后。左上角用「椭圆凹形肩」伪元素（::before）melt 到屏幕顶——水平半径小、垂直半径
+   大，贴竖直壁更陡、只在近顶边时快速外扩，仿原生刘海右肩（用户选定）。左下角凸圆角与
+   刘海右下镜像（用户选定）。 */
+.island-pill.notch {
+  position: relative;
+  width: calc(100% - var(--bar-shoulder, 8px));
+  height: var(--notch-h, 38px);
+  margin: 0 0 0 var(--bar-shoulder, 8px);
+  /* 内容右侧让出 overlap（刘海背后）+ 间距，避免文字钻到刘海下被遮 */
+  padding: 0 calc(var(--bar-overlap, 28px) + 10px) 0 8px;
+  /* 收起态居中：小人 + 会话数成组居中，消除「小人贴最左、中间一大片空」的失衡 */
+  justify-content: center;
+  gap: 12px;
+  background: var(--island-surface);
+  /* 左下凸圆角（与刘海右下镜像）；顶/右/右下直角 */
+  border-radius: 0 0 0 var(--bar-radius, 10px);
+  box-shadow: none;
+}
+/* 左上椭圆凹形肩（concave shoulder）：方块贴主体左缘外侧、顶部对齐。椭圆径向遮罩
+   （水平半径 = bar-shoulder，垂直半径 = bar-shoulder-h，后者更大）以方块左下角为圆心，
+   咬掉椭圆 1/4 → 仅留右上楔形：右沿（贴主体左壁）竖直、上沿（贴屏幕顶边）水平。垂直半径
+   大于水平半径 → 弧线贴壁段更陡、只在接近顶边时快速向左外扩，比正圆四分之一弧更接近原生。 */
+.island-pill.notch::before {
+  content: '';
+  position: absolute;
+  left: calc(-1 * var(--bar-shoulder, 8px));
+  top: 0;
+  width: var(--bar-shoulder, 8px);
+  height: var(--bar-shoulder-h, 24px);
+  background: var(--island-surface);
+  pointer-events: none;
+  -webkit-mask: radial-gradient(
+    var(--bar-shoulder, 8px) var(--bar-shoulder-h, 24px) at bottom left,
+    transparent 99%,
+    #000 100%
+  );
+  mask: radial-gradient(
+    var(--bar-shoulder, 8px) var(--bar-shoulder-h, 24px) at bottom left,
+    transparent 99%,
+    #000 100%
+  );
+}
+.island-pill-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.island-pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+/* running 状态：路飞跑步小人（Lottie）替代蓝点。
+   盒子 40px > pill 高 34px：水平负 margin 收紧与文案间距；下方负 margin 让小人
+   略微「踩出」bar 下沿（窗口下方仍有 12px 空间，不会被裁），看起来像在 bar 上跑。 */
+.island-pill-runner {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  margin: 0 -8px -6px -6px;
+  pointer-events: none;
+}
+.island-pill-runner svg {
+  display: block;
+}
+/* 刘海黑条：跑步小人放大到「超过」黑条高并踩出下沿，显著变大。
+   盒子高 = 黑条高 + 10：margin-bottom:-10 抵消多出的高度，使 flex 居中后小人顶贴黑条顶
+   （头不裁）、底伸出黑条下沿 10px 到下方透明区/壁纸（更大更生动）。窗口已在 collapsedBounds
+   加高 RUNNER_FOOT_ROOM 容纳踩出，故不会被窗口裁。宽=高（方盒），瘦高人物在盒内横向居中。 */
+.island-pill.notch .island-pill-runner {
+  width: calc(var(--notch-h, 38px) + 10px);
+  height: calc(var(--notch-h, 38px) + 10px);
+  margin: 0 0 -10px 0;
+}
+.island-pill.running .island-pill-dot {
+  background: #3b82f6;
+  box-shadow: 0 0 6px #3b82f6;
+}
+.island-pill.waiting .island-pill-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 6px #f59e0b;
+  animation: island-pulse 1.2s ease-in-out infinite;
+}
+.island-pill.error .island-pill-dot {
+  background: #ef4444;
+  box-shadow: 0 0 6px #ef4444;
+}
+.island-pill.done .island-pill-dot {
+  background: #22c55e;
+}
+.island-pill.idle .island-pill-dot {
+  background: #6b7280;
+}
+@keyframes island-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.island-pill-label {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.island-pill-count {
+  color: #9ca3af;
+  white-space: nowrap;
+}
+
+/* ---- hover 聚合面板 ---- */
+.island-panel {
+  margin: 0 8px 8px;
+  background: rgba(18, 18, 22, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+.island-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.island-panel-title {
+  font-weight: 700;
+  font-size: 12px;
+}
+.island-panel-count {
+  margin-left: auto;
+  color: #9ca3af;
+  font-size: 11px;
+}
+.island-panel-list {
+  max-height: 540px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.island-panel-empty {
+  padding: 18px;
+  text-align: center;
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+/* ---- 单会话卡片 ---- */
+.island-card {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 8px;
+  cursor: pointer;
+  color: inherit;
+}
+.island-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.island-card-dot {
+  flex-shrink: 0;
+  width: 16px;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+}
+.island-card-dot.running {
+  color: #3b82f6;
+}
+.island-card-dot.waiting {
+  color: #f59e0b;
+}
+.island-card-dot.done {
+  color: #22c55e;
+}
+.island-card-dot.error {
+  color: #ef4444;
+}
+.island-card-dot.idle {
+  color: #6b7280;
+}
+.island-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+.island-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+}
+.island-card-project {
+  font-weight: 600;
+  white-space: nowrap;
+  /* base name 始终完整可见：不收缩、不省略，空间不足时由右侧会话名让位 */
+  flex-shrink: 0;
+}
+.island-card-session {
+  color: #9ca3af;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* 让会话名承担收缩与省略，把右侧内容往右挤而非截断 base name */
+  min-width: 0;
+  flex-shrink: 1;
+}
+.island-card-time {
+  margin-left: auto;
+  color: #6b7280;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.island-card-msg {
+  color: #c4c4c8;
+  font-size: 11px;
+  line-height: 1.45;
+  /* 两行夹断：比单行省略展示更多消息内容（满足「更长」诉求） */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.island-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.island-tag {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #c4c4c8;
+}
+.island-tag.ghost {
+  background: rgba(255, 255, 255, 0.05);
+}
+/* 模型标签：暖色调点缀，与终端/时长标签区分（Claude 品牌色系） */
+.island-tag.model {
+  background: rgba(217, 119, 87, 0.18);
+  color: #f0a17e;
+}
+/* 已持续时长：等宽数字避免逐秒跳动时宽度抖动 */
+.island-tag.dur {
+  background: rgba(255, 255, 255, 0.05);
+  color: #9ca3af;
+  font-variant-numeric: tabular-nums;
+}
+/* 单色细线时钟字形（◷）：随 .dur 继承灰色，不再是彩色 emoji；略放大并居中对齐数字 */
+.island-tag-clock {
+  font-size: 1.15em;
+  line-height: 1;
+  vertical-align: -0.5px;
+}
+.island-tag.status.running {
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+}
+.island-tag.status.waiting {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fcd34d;
+}
+.island-tag.status.done {
+  background: rgba(34, 197, 94, 0.2);
+  color: #86efac;
+}
+.island-tag.status.error {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
+.island-tag.status.idle {
+  background: rgba(107, 114, 128, 0.2);
+  color: #cbd5e1;
+}
+.island-card-jump {
+  flex-shrink: 0;
+  align-self: center;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #4b5563;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    color 0.15s,
+    background 0.15s,
+    transform 0.12s;
+}
+.island-card:hover .island-card-jump {
+  color: #e8e8ea;
+  background: rgba(255, 255, 255, 0.13);
+  transform: scale(1.08);
+}
+
+/* ---- 审批面板 ---- */
+.island-approval {
+  margin: 0 8px 8px;
+  background: rgba(18, 18, 22, 0.97);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 14px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+.island-approval-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 4px;
+}
+.island-approval-tool {
+  font-weight: 700;
+  font-size: 13px;
+  color: #fcd34d;
+}
+.island-approval-ctx {
+  color: #9ca3af;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.island-approval-countdown {
+  margin-left: auto;
+  font-size: 11px;
+  color: #9ca3af;
+  font-variant-numeric: tabular-nums;
+}
+.island-approval-subtitle {
+  padding: 0 12px 6px;
+  font-size: 12px;
+  color: #c4c4c8;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.island-approval-preview {
+  margin: 0 12px;
+  max-height: 320px;
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 8px;
+  position: relative;
+}
+.island-approval-preview .log-highlight {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #d4d4d8;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.island-approval-countdown-bar {
+  height: 2px;
+  margin: 8px 12px 0;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.island-approval-countdown-fill {
+  display: block;
+  height: 100%;
+  background: #f59e0b;
+  transition: width 1s linear;
+}
+.island-approval-actions {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px 12px;
+}
+.island-btn {
+  flex: 1;
+  height: 34px;
+  border-radius: 8px;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+/* 键盘直达提示（⌃Y）：跟随按钮前景色，半透明描边胶囊，等宽数字不抖动 */
+.island-btn-kbd {
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.12);
+  border: 1px solid currentColor;
+  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+}
+.island-btn.deny {
+  background: rgba(255, 255, 255, 0.1);
+  color: #e8e8ea;
+}
+.island-btn.deny:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.island-btn.allow {
+  background: #f4f4f5;
+  color: #18181b;
+}
+.island-btn.allow:hover {
+  background: #ffffff;
+}
+.island-btn.bypass {
+  background: #dc2626;
+  color: #ffffff;
+}
+.island-btn.bypass:hover {
+  background: #ef4444;
+}

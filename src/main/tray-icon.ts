@@ -1,0 +1,3 @@
+/** 托盘模板图标（18px 单色 pill），内联为 data URL 以免打包路径问题；setTemplateImage 后随明暗菜单栏自动反色。 */
+export const TRAY_ICON_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABIAAAASCAYAAABWzo5XAAAABmJLR0QA/wD/AP+gvaeTAAAAVElEQVQ4jWNgGAVDG7AxMDB0MjAwPGNgYPhPAD9lYGDogOrBAB1EGICOO7AZRIxL0PFzmGYmJIP+ExsGSOAvNoMWk2EQVj1sDBA/P2WgMLBHwVABAFrxM8pSafSbAAAAAElFTkSuQmCC'

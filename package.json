@@ -1,0 +1,110 @@
+{
+  "name": "vibe-monitor",
+  "version": "0.1.0",
+  "description": "灵动岛 — 本地 Claude Code 会话监控 + 岛内审批（Electron + React + TypeScript）",
+  "main": "out/main/index.js",
+  "packageManager": "pnpm@11.5.0",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "postinstall": "node node_modules/electron/install.js && node tools/patch-electron-plist.mjs",
+    "prepare": "husky",
+    "pack": "electron-builder --dir",
+    "dist": "pnpm typecheck && electron-vite build && electron-builder",
+    "install-hooks": "node tools/island-hooks-install.mjs",
+    "uninstall-hooks": "node tools/island-hooks-install.mjs --uninstall"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml,css}": [
+      "prettier --write"
+    ]
+  },
+  "dependencies": {
+    "lottie-web": "^5.13.0",
+    "p-limit": "^7.3.0",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@electron-toolkit/eslint-config-prettier": "^3.0.0",
+    "@electron-toolkit/eslint-config-ts": "^3.1.0",
+    "@electron-toolkit/utils": "^4.0.0",
+    "@types/node": "^24.9.0",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "@vitest/coverage-v8": "^4.1.7",
+    "electron": "^42.3.0",
+    "electron-builder": "^26.8.1",
+    "electron-vite": "^5.0.0",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.7",
+    "prettier": "^3.8.3",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "typescript": "^6.0.3",
+    "vite": "^7.3.3",
+    "vitest": "^4.1.7"
+  },
+  "build": {
+    "appId": "io.github.ocean23.vibe-monitor",
+    "productName": "Vibe Monitor",
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
+    },
+    "files": [
+      "out/**",
+      "!out/**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "tools",
+        "to": "tools",
+        "filter": [
+          "island-hook.mjs",
+          "island-hooks-install.mjs"
+        ]
+      }
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
+  }
+}

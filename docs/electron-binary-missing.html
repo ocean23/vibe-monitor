@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Electron 二进制缺失导致 pnpm dev 报错</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+      color: #1a1a1a;
+      background: #f7f8fa;
+      padding: 40px 16px 80px;
+    }
+
+    .page {
+      max-width: 820px;
+      margin: 0 auto;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 16px rgba(0,0,0,.08);
+      padding: 48px 56px;
+    }
+
+    /* Header */
+    .doc-header { margin-bottom: 36px; padding-bottom: 24px; border-bottom: 1px solid #e8eaed; }
+    .doc-header h1 { font-size: 24px; font-weight: 700; color: #111; margin-bottom: 8px; }
+    .meta { display: flex; gap: 20px; font-size: 13px; color: #666; flex-wrap: wrap; }
+    .meta span { display: flex; align-items: center; gap: 4px; }
+
+    /* Sections */
+    h2 {
+      font-size: 17px;
+      font-weight: 600;
+      color: #111;
+      margin: 36px 0 12px;
+      padding-left: 12px;
+      border-left: 3px solid #4f6ef7;
+    }
+    h3 { font-size: 14px; font-weight: 600; color: #333; margin: 20px 0 8px; }
+    p { margin-bottom: 12px; color: #333; }
+
+    /* Alert boxes */
+    .alert {
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin: 16px 0;
+      font-size: 14px;
+    }
+    .alert-error   { background: #fff2f2; border-left: 4px solid #e53e3e; color: #7b1a1a; }
+    .alert-info    { background: #eff4ff; border-left: 4px solid #4f6ef7; color: #1a3a7b; }
+    .alert-success { background: #f0faf4; border-left: 4px solid #38a169; color: #1a5c35; }
+    .alert-warning { background: #fffbeb; border-left: 4px solid #d97706; color: #6b3f00; }
+    .alert strong  { display: block; margin-bottom: 4px; }
+
+    /* Code */
+    pre {
+      background: #1e2030;
+      color: #c9d1d9;
+      border-radius: 8px;
+      padding: 18px 20px;
+      overflow-x: auto;
+      font-size: 13px;
+      line-height: 1.6;
+      margin: 12px 0 20px;
+    }
+    code { font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, monospace; }
+    p code, li code {
+      background: #f0f2f5;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+      color: #c0392b;
+    }
+    .comment { color: #6a737d; }
+    .cmd     { color: #79b8ff; }
+    .string  { color: #9ecbff; }
+    .key     { color: #b5cea8; }
+
+    /* Steps */
+    .steps { counter-reset: step; list-style: none; margin: 16px 0; }
+    .steps li {
+      counter-increment: step;
+      position: relative;
+      padding: 12px 16px 12px 52px;
+      margin-bottom: 10px;
+      background: #f9fafb;
+      border-radius: 8px;
+    }
+    .steps li::before {
+      content: counter(step);
+      position: absolute;
+      left: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 24px;
+      height: 24px;
+      background: #4f6ef7;
+      color: #fff;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    /* Table */
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
+    th {
+      background: #f0f2f5;
+      text-align: left;
+      padding: 10px 14px;
+      font-weight: 600;
+      color: #333;
+      border-bottom: 2px solid #dde1e7;
+    }
+    td { padding: 10px 14px; border-bottom: 1px solid #eee; vertical-align: top; }
+    tr:hover td { background: #fafbfc; }
+
+    /* Tags */
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-size: 12px;
+      font-weight: 500;
+      margin-right: 6px;
+    }
+    .tag-env    { background: #e0e7ff; color: #3730a3; }
+    .tag-pnpm   { background: #fce7f3; color: #9d174d; }
+    .tag-electron { background: #d1fae5; color: #065f46; }
+
+    /* Divider */
+    hr { border: none; border-top: 1px solid #e8eaed; margin: 32px 0; }
+
+    /* Footer */
+    .doc-footer {
+      margin-top: 48px;
+      padding-top: 20px;
+      border-top: 1px solid #e8eaed;
+      font-size: 13px;
+      color: #999;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <header class="doc-header">
+    <h1>Electron 二进制缺失导致 <code>pnpm dev</code> 报错</h1>
+    <div class="meta">
+      <span>&#128197; 2026-06-01</span>
+      <span>
+        <span class="tag tag-env">macOS</span>
+        <span class="tag tag-pnpm">pnpm</span>
+        <span class="tag tag-electron">Electron 42</span>
+      </span>
+    </div>
+  </header>
+
+  <!-- 问题现象 -->
+  <h2>问题现象</h2>
+  <p>在新机器上执行 <code>pnpm dev</code> 时，构建阶段正常完成，但随后报错并退出：</p>
+
+  <pre><code><span class="comment">vite v7.3.3 building ssr environment for development...</span>
+✓ built in 83ms
+electron main process built successfully
+<span class="comment">...</span>
+error during start dev server and electron app:
+<span class="string">Error: Electron uninstall</span>
+    at getElectronPath (file:///.../<span class="cmd">electron-vite</span>/dist/chunks/lib-q6ns0vZr.js:155:19)
+    at startElectron (...)
+[ELIFECYCLE] Command failed with exit code 1.</code></pre>
+
+  <div class="alert alert-error">
+    <strong>关键错误信息</strong>
+    <code>Error: Electron uninstall</code> — electron-vite 找不到 Electron 可执行文件，读取 <code>path.txt</code> 失败。
+  </div>
+
+  <!-- 根本原因 -->
+  <h2>根本原因</h2>
+  <p>
+    Electron 的 npm 包本身不包含二进制文件，需由 <code>install.js</code> 从 GitHub Releases 下载对应平台的压缩包并解压。
+    安装成功后会生成两个产物：
+  </p>
+
+  <table>
+    <thead>
+      <tr><th>产物</th><th>路径</th><th>作用</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>path.txt</code></td>
+        <td><code>node_modules/.pnpm/electron@x.x.x/node_modules/electron/path.txt</code></td>
+        <td>记录可执行文件相对路径，electron-vite 读取此文件定位二进制</td>
+      </tr>
+      <tr>
+        <td><code>dist/</code></td>
+        <td><code>…/electron/dist/Electron.app</code>（macOS）</td>
+        <td>实际的 Electron 应用程序包</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>
+    <strong>关键变化：从 Electron 42 起，官方移除了下载二进制的 <code>postinstall</code> 脚本</strong>（出于供应链安全——postinstall 是 npm 投毒的常见入口）。
+    <code>install.js</code> 仍随包发布（挂为 <code>install-electron</code> 这个 bin），但 <code>npm/pnpm install</code> 不再自动执行它，改为「首次运行 electron 的 bin 时按需懒下载」。
+    而 <code>electron-vite</code> 的 <code>getElectronPath</code> 是直接读 <code>path.txt</code>、读不到就抛错，走不到触发懒下载那一步，于是二进制缺失的问题在 <code>pnpm dev</code> 时才暴露。
+  </p>
+
+  <div class="alert alert-success">
+    <strong>本项目已自动处理</strong>
+    根 <code>package.json</code> 的 <code>postinstall</code> 已显式调用 <code>node node_modules/electron/install.js</code> 下载二进制，正常一条 <code>pnpm install</code> 即可装好。下面的手动步骤仅在你用了 <code>--ignore-scripts</code>、或下载因网络失败时才需要。
+  </div>
+
+  <!-- 诊断方法 -->
+  <h2>快速诊断</h2>
+  <p>执行以下命令确认 Electron 二进制是否存在：</p>
+
+  <pre><code><span class="comment"># 检查 path.txt</span>
+<span class="cmd">cat</span> node_modules/.pnpm/electron@*/node_modules/electron/path.txt
+
+<span class="comment"># 检查 dist 目录（macOS）</span>
+<span class="cmd">ls</span> node_modules/.pnpm/electron@*/node_modules/electron/dist/Electron.app</code></pre>
+
+  <p>若两条命令均报错或无输出，即为本文描述的问题。</p>
+
+  <!-- 解决方案 -->
+  <h2>解决方案</h2>
+  <p>通过国内镜像手动执行 Electron 的安装脚本（先确认实际版本号）：</p>
+
+  <pre><code><span class="comment"># 1. 确认 Electron 版本</span>
+<span class="cmd">cat</span> node_modules/.pnpm/electron@*/node_modules/electron/package.json | <span class="cmd">grep</span> '"version"'
+<span class="comment"># 输出示例：  "version": "42.3.0"</span>
+
+<span class="comment"># 2. 用国内镜像重新下载（替换版本号）</span>
+<span class="cmd">ELECTRON_MIRROR</span>=<span class="string">"https://npmmirror.com/mirrors/electron/"</span> \
+  <span class="cmd">node</span> node_modules/.pnpm/electron@<span class="key">42.3.0</span>/node_modules/electron/install.js
+
+<span class="comment"># 3. 验证</span>
+<span class="cmd">cat</span> node_modules/.pnpm/electron@<span class="key">42.3.0</span>/node_modules/electron/path.txt
+<span class="comment"># 预期输出：Electron.app/Contents/MacOS/Electron</span></code></pre>
+
+  <div class="alert alert-success">
+    <strong>验证成功后</strong>
+    直接运行 <code>pnpm dev</code>，无需重新 install。
+  </div>
+
+  <!-- 永久配置 -->
+  <h2>永久配置（国内网络推荐）</h2>
+  <p>把镜像写进<strong>全局</strong> <code>~/.npmrc</code>，之后每次 <code>pnpm install</code> 触发的二进制下载都会走国内镜像：</p>
+
+  <pre><code><span class="cmd">echo</span> <span class="string">'electron_mirror=https://npmmirror.com/mirrors/electron/'</span> >> ~/.npmrc</code></pre>
+
+  <div class="alert alert-warning">
+    <strong>不要写进项目的 <code>.npmrc</code> 并提交</strong>
+    本项目是公开仓库，硬编码国内镜像会拖慢海外用户。镜像只配在你本机的全局 <code>~/.npmrc</code>。
+  </div>
+
+  <!-- 常用镜像 -->
+  <h2>常用 Electron 镜像地址</h2>
+
+  <table>
+    <thead>
+      <tr><th>镜像</th><th>地址</th><th>备注</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>npmmirror（推荐）</td>
+        <td><code>https://npmmirror.com/mirrors/electron/</code></td>
+        <td>国内速度最快，同步及时</td>
+      </tr>
+      <tr>
+        <td>GitHub Releases（官方）</td>
+        <td><code>https://github.com/electron/electron/releases/download/</code></td>
+        <td>需能访问 GitHub</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- 总结 -->
+  <hr />
+  <h2>总结</h2>
+
+  <ol class="steps">
+    <li>Electron 42 起官方移除了下载二进制的 postinstall；本项目改由根 <code>postinstall</code> 调 <code>install.js</code> 安装，正常 <code>pnpm install</code> 即可装好。</li>
+    <li>报错信息 <code>Error: Electron uninstall</code> 即代表 <code>path.txt</code> 不存在（二进制没装上）。</li>
+    <li>若被 <code>--ignore-scripts</code> 跳过或下载失败：用 <code>ELECTRON_MIRROR</code> 指定国内镜像，手动执行 <code>install.js</code> 即可修复。</li>
+    <li>把镜像固化到<strong>全局</strong> <code>~/.npmrc</code>（勿提交进项目），避免新成员重复踩坑。</li>
+  </ol>
+
+  <div class="doc-footer">
+    vibe-monitor 项目文档 &nbsp;·&nbsp; 2026-06-01
+  </div>
+
+</div>
+</body>
+</html>

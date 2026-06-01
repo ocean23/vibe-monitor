@@ -1,0 +1,15 @@
+# pnpm v10+ 不再读 package.json 的 `pnpm` 字段，相关配置统一搬到这里。
+# 项目并非 workspace（无 packages），但 pnpm 推荐用此文件承载 root 级配置。
+
+# 显式声明哪些依赖可在 install 阶段运行 build 脚本——pnpm v11 默认全部禁止以防供应链攻击。
+allowBuilds:
+  # electron 42 起已移除下载二进制的 postinstall（改为首次运行 bin 时懒下载），此包已无 build 脚本。
+  # 这里保留 true 仅为防未来降级；二进制改由根 package.json 的 postinstall 调 electron/install.js 安装。
+  electron: true
+  # macOS 开发与 nsis 打包均不需要 winstaller 的 Squirrel.Windows 原生构建，显式禁用。
+  electron-winstaller: false
+  esbuild: true
+
+minimumReleaseAgeExclude:
+  - lint-staged@17.0.7
+  - tinyexec@1.2.4
