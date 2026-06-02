@@ -11,9 +11,9 @@
 
 /**
  * 会话状态机的五个状态。
- * - `idle`：会话已开但未在执行（刚启动/resume，或 running 陈旧降级后）——停在输入框等用户
+ * - `idle`：会话已开但未在执行（刚启动/resume、running 陈旧降级后，或空闲等待输入）——停在输入框等用户
  * - `running`：正在执行（有 prompt / 工具动作）
- * - `waiting`：等待用户（审批 / 输入）
+ * - `waiting`：等待用户**授权**（真·等待审批；如 PreToolUse 回退到终端原生询问的场景）
  * - `done`：本轮结束
  * - `error`：出错
  */
@@ -23,7 +23,7 @@ export type SessionStatus = 'idle' | 'running' | 'waiting' | 'done' | 'error'
  * Claude Code hook 事件类型（对齐 Claude Code 原生 hook 名）。
  * - `SessionStart`：会话启动 → idle（停在输入框，非执行态，不再误报 running）
  * - `UserPromptSubmit` / `PreToolUse`：有动作 → running
- * - `Notification`：等待用户（审批/输入）→ waiting
+ * - `Notification`：按 message 语义分类（授权请求 → waiting，空闲等输入 → idle，其余信息通知保留原态）
  * - `Stop`：本轮结束 → done
  * - `SessionEnd`：会话结束（Ctrl+C/Ctrl+D 退出、/clear、logout 等）→ 立即从岛上移除（退出即清）
  */

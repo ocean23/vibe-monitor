@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest'
-import { IslandState } from './island-state'
+import { IslandState, classifyNotification } from './island-state'
 import type { IslandHookEvent } from '../../shared/island-types'
 import type { AuditFn } from '../audit-log'
 
 function evt(partial: Partial<IslandHookEvent> & Pick<IslandHookEvent, 'kind'>): IslandHookEvent {
   return { session_id: 's1', ...partial }
 }
+
+/** 真·授权请求的 Notification message（取自 Claude Code 实测），分类为 permission → waiting。 */
+const PERM_MSG = 'Claude needs permission to use Bash'
 
 describe('island-state', () => {
   let audit: Mock<AuditFn>
@@ -34,9 +37,43 @@ describe('island-state', () => {
       expect(state.list()[0].status).toBe('running')
     })
 
-    it('Notification → waiting', () => {
-      state.applyEvent(evt({ kind: 'Notification' }))
+    it('Notification(授权请求) → waiting（真·等待审批）', () => {
+      state.applyEvent(evt({ kind: 'Notification', last_message: PERM_MSG }))
       expect(state.list()[0].status).toBe('waiting')
+    })
+
+    it('Notification(needs your permission 变体) → waiting', () => {
+      state.applyEvent(
+        evt({ kind: 'Notification', last_message: 'Claude needs your permission to use Update' })
+      )
+      expect(state.list()[0].status).toBe('waiting')
+    })
+
+    it('Notification(空闲等待输入) → idle，而非误报 waiting', () => {
+      state.applyEvent(
+        evt({ kind: 'Notification', last_message: 'Claude is waiting for your input' })
+      )
+      expect(state.list()[0].status).toBe('idle')
+    })
+
+    it('Notification(worktree 信息通知) 不凭空标 waiting：无前态落 idle', () => {
+      state.applyEvent(
+        evt({ kind: 'Notification', last_message: 'Created worktree at /tmp/wt on branch x' })
+      )
+      expect(state.list()[0].status).toBe('idle')
+    })
+
+    it('Notification(信息通知) 保留 running 前态（绝不把执行中会话翻成 waiting/idle）', () => {
+      state.applyEvent(evt({ kind: 'UserPromptSubmit' })) // running
+      state.applyEvent(
+        evt({ kind: 'Notification', last_message: 'Exited worktree. Your work is preserved.' })
+      )
+      expect(state.list()[0].status).toBe('running')
+    })
+
+    it('Notification(空 message) 归 other：无前态落 idle，不误报 waiting', () => {
+      state.applyEvent(evt({ kind: 'Notification' }))
+      expect(state.list()[0].status).toBe('idle')
     })
 
     it('Stop → done (carries stop_reason)', () => {
@@ -50,13 +87,13 @@ describe('island-state', () => {
       // Stop 先到 → done；随后 Claude Code 发桌面通知触发 Notification → 不应退回 waiting
       state.applyEvent(evt({ kind: 'Stop' }))
       expect(state.list()[0].status).toBe('done')
-      state.applyEvent(evt({ kind: 'Notification' }))
+      // 即便是「授权请求」措辞的通知，已 done 的会话也不被拉回 waiting（done/error 护栏）
+      state.applyEvent(evt({ kind: 'Notification', last_message: PERM_MSG }))
       expect(state.list()[0].status).toBe('done')
     })
 
     it('Notification after error keeps error (同理)', () => {
       state.applyEvent(evt({ kind: 'Stop', stop_reason: 'error' }))
-      state.sessions.get('s1') // verify exists
       // 手动设为 error 状态（暂无 error 专用 hook，直接写内部字段验证保护逻辑）
       const s = state.list()[0]
       Object.assign(s, { status: 'error' })
@@ -136,7 +173,12 @@ describe('island-state', () => {
 
   it('isolates multiple sessions', () => {
     state.applyEvent({ kind: 'PreToolUse', session_id: 'a', project_name: 'pa' })
-    state.applyEvent({ kind: 'Notification', session_id: 'b', project_name: 'pb' })
+    state.applyEvent({
+      kind: 'Notification',
+      session_id: 'b',
+      project_name: 'pb',
+      last_message: PERM_MSG
+    })
     expect(state.count()).toBe(2)
     const a = state.list().find((s) => s.sessionId === 'a')
     const b = state.list().find((s) => s.sessionId === 'b')
@@ -239,7 +281,7 @@ describe('island-state', () => {
 
     it('downgrades running and waiting (leaves done/idle untouched)', () => {
       clock = 1000
-      stale.applyEvent({ kind: 'Notification', session_id: 'w' }) // waiting
+      stale.applyEvent({ kind: 'Notification', session_id: 'w', last_message: PERM_MSG }) // waiting
       stale.applyEvent({ kind: 'Stop', session_id: 'd' }) // done
       stale.applyEvent({ kind: 'SessionStart', session_id: 'i' }) // idle
       clock = 1000 + 5000
@@ -296,7 +338,7 @@ describe('island-state', () => {
 
     it('keeps a non-running session still within expireMs', () => {
       clock = 1000
-      gc.applyEvent({ kind: 'Notification', session_id: 'w' }) // waiting @1000
+      gc.applyEvent({ kind: 'Notification', session_id: 'w', last_message: PERM_MSG }) // waiting @1000
       clock = 1000 + 3000 // < expireMs
       gc.sweepStale()
       expect(gc.count()).toBe(1)
@@ -317,7 +359,7 @@ describe('island-state', () => {
       clock = 1000
       gc.applyEvent({ kind: 'SessionStart', session_id: 'i' }) // idle
       gc.applyEvent({ kind: 'Stop', session_id: 'd' }) // done
-      gc.applyEvent({ kind: 'Notification', session_id: 'w' }) // waiting
+      gc.applyEvent({ kind: 'Notification', session_id: 'w', last_message: PERM_MSG }) // waiting
       clock = 1000 + 6000
       gc.sweepStale() // idle/done 直接过期删除；waiting 先降级为 idle
       expect(gc.count()).toBe(1) // 仅剩被降级的 'w'（现 idle）
@@ -351,5 +393,39 @@ describe('island-state', () => {
       expect(ids.has('s4')).toBe(false)
       expect(ids.has('s204')).toBe(true)
     })
+  })
+})
+
+describe('classifyNotification', () => {
+  // 取自 Claude Code 实测 message（含同一仓 ~/.claude 出现的两种授权措辞）
+  it('授权请求 → permission（两种措辞 + 中英混排都命中）', () => {
+    expect(classifyNotification('Claude needs permission to use Bash')).toBe('permission')
+    expect(classifyNotification('Claude needs your permission to use Update')).toBe('permission')
+    expect(classifyNotification('等待操作确认\nClaude needs your permission to use Update')).toBe(
+      'permission'
+    )
+  })
+
+  it('空闲等待输入 → idle', () => {
+    expect(classifyNotification('Claude is waiting for your input')).toBe('idle')
+  })
+
+  it('worktree / 信息类通知 → other', () => {
+    expect(
+      classifyNotification(
+        'Created worktree at /Users/x/.claude/worktrees/foo on branch worktree-foo. The session is now working in the worktree.'
+      )
+    ).toBe('other')
+    expect(
+      classifyNotification(
+        'Exited worktree. Your work is preserved at /Users/x/.claude/worktrees/foo'
+      )
+    ).toBe('other')
+  })
+
+  it('空 / undefined → other（安全方向：识别不到绝不报 waiting）', () => {
+    expect(classifyNotification(undefined)).toBe('other')
+    expect(classifyNotification('')).toBe('other')
+    expect(classifyNotification('Some unrelated notification')).toBe('other')
   })
 })

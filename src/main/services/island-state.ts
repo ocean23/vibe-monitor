@@ -40,16 +40,48 @@ const STALE_SWEEP_INTERVAL_MS = 30_000
 /**
  * hook kind → 会话状态映射（FR-002）。
  *
- * 不含 `SessionEnd`：它不对应任何「状态」，而是直接把会话从岛上移除（见 {@link IslandState.applyEvent}），
- * 故用 Partial——查不到映射的 kind 走 applyEvent 里的 unknown_kind 兜底（SessionEnd 在那之前已被拦截）。
+ * 不含 `SessionEnd`（直接把会话从岛上移除）与 `Notification`（语义繁多，需按 message 分类——
+ * 见 {@link classifyNotification} / {@link IslandState.notificationStatus}）：这两类在
+ * {@link IslandState.applyEvent} 里被提前拦截单独处理。故用 Partial——查不到映射的其它 kind
+ * 走 applyEvent 里的 unknown_kind 兜底。
  */
 const KIND_TO_STATUS: Partial<Record<IslandHookKind, SessionStatus>> = {
   // SessionStart：会话刚开/resume，停在输入框等用户——是 idle 而非 running（修复误报运行中）。
   SessionStart: 'idle',
   UserPromptSubmit: 'running',
   PreToolUse: 'running',
-  Notification: 'waiting',
   Stop: 'done'
+}
+
+/** {@link classifyNotification} 的三类语义。 */
+export type NotificationKind = 'permission' | 'idle' | 'other'
+
+/**
+ * 按 message 文本判定 Notification 的语义。
+ *
+ * Claude Code 的 `Notification` hook **并非只在「等待审批」时触发**，常见至少三类：
+ *   - 工具授权请求：`"Claude needs permission to use Bash"` / `"Claude needs your permission to use X"`
+ *   - 空闲等待输入：`"Claude is waiting for your input"`（输入框静默 ~60s，每轮回复后也会发）
+ *   - 纯信息通知：`"Created worktree at …"` / `"Exited worktree…"` / 登录成功 / MCP elicitation 等
+ *
+ * 历史实现把**所有** Notification 一律映射成 `waiting`（→ 灵动岛显示「等待审批」），导致「会话
+ * 并未在等待审批却显示等待审批」的误报。这里据 message 文本分类，调用方只把 `permission` 判为
+ * waiting。**不依赖 payload.notification_type**——该字段文档有载但真实 stdin 常缺失，文本更可靠。
+ *
+ * 匹配策略（大小写不敏感，锚定句首稳定子串）：
+ *   - `permission`：核心子串 `permission to use`，同时覆盖 "needs permission" 与 "needs your
+ *     permission" 两种措辞，以及中英混排（如 `"等待操作确认\nClaude needs your permission to use X"`，
+ *     内嵌英文核心仍可命中）。
+ *   - `idle`：`waiting for your input`。
+ *   - `other`：其余（含空 message / 无法识别）。
+ *
+ * 安全方向：识别不到一律落 `other`，宁可「少报等待审批」也绝不误报（符合容错铁律「绝不误导」）。
+ */
+export function classifyNotification(message: string | undefined): NotificationKind {
+  if (!message) return 'other'
+  if (/permission to use|needs (?:your )?permission/i.test(message)) return 'permission'
+  if (/waiting for your input/i.test(message)) return 'idle'
+  return 'other'
 }
 
 export interface IslandStateOptions {
@@ -66,8 +98,9 @@ export interface IslandStateOptions {
  * 灵动岛会话状态机（主进程，纯内存）。
  *
  * 持有 `Map<sessionId, SessionState>`，按 hook 事件流转状态：
- * `SessionStart → idle`、`UserPromptSubmit/PreToolUse → running`、`Notification → waiting`、
- * `Stop → done`，而 `SessionEnd → 立即移除`（退出即清，不走过期阈值）。另有 {@link sweepStale}
+ * `SessionStart → idle`、`UserPromptSubmit/PreToolUse → running`、`Stop → done`，
+ * `Notification` 按 message 语义分类（仅授权请求 → waiting，空闲等输入 → idle，其余信息通知保留原态，
+ * 见 {@link notificationStatus}），而 `SessionEnd → 立即移除`（退出即清，不走过期阈值）。另有 {@link sweepStale}
  * 定时维护：把长时间无事件的 running 兜底降级为 idle（防止 Stop 丢失 / 斜杠命令导致永久卡在运行中），
  * 并把更久没动的非 running 会话整条移除（GC 掉连 SessionEnd 都没来的遗弃会话）。
  * transcript-watcher 通过 {@link updateLastMessage} 补「最后消息」明细。
@@ -110,26 +143,25 @@ export class IslandState extends EventEmitter {
       this.remove(sessionId)
       return
     }
-    const status = KIND_TO_STATUS[event.kind]
+    const prev = this.sessions.get(sessionId)
+    // Notification 不走静态映射：其触发原因繁多（工具授权请求 / 空闲等输入 / worktree·登录·MCP
+    // 等纯信息通知），只有「授权请求」才是真正的等待审批。按 message 分类裁决（{@link
+    // notificationStatus}，内含 done/error 护栏）；其余 kind 用静态 KIND_TO_STATUS。
+    const status =
+      event.kind === 'Notification'
+        ? this.notificationStatus(event.last_message, prev)
+        : KIND_TO_STATUS[event.kind]
     if (!status) {
       void this.audit('island.event_unknown_kind', { kind: event.kind, sessionId })
       return
     }
-
-    const prev = this.sessions.get(sessionId)
-    // Notification 可在 Stop 之后触发（如 Claude Code 的「任务完成」桌面通知），
-    // 若此时会话已是 done/error，不允许退回 waiting——否则已完成的会话会卡在「等待审批」。
-    const effectiveStatus: SessionStatus =
-      status === 'waiting' && (prev?.status === 'done' || prev?.status === 'error')
-        ? prev.status
-        : status
     const now = event.ts ?? this.now()
     const next: SessionState = {
       sessionId,
       // 新字段优先取事件值，缺省时保留旧值（hook 各节点携带字段不全）
       projectName: event.project_name ?? prev?.projectName,
       sessionName: event.session_name ?? prev?.sessionName,
-      status: effectiveStatus,
+      status,
       lastMessage: event.last_message ?? prev?.lastMessage,
       model: event.model ?? prev?.model,
       terminal: event.terminal ?? prev?.terminal,
@@ -141,6 +173,31 @@ export class IslandState extends EventEmitter {
     this.sessions.set(sessionId, next)
     this.evictIfNeeded()
     this.emitChange()
+  }
+
+  /**
+   * 把一条 Notification 裁决为会话状态——从根上消除「会话并未等待审批却显示等待审批」的误报。
+   *
+   * - **已 done/error 的会话**：任何 Notification 都不改状态。任务完成桌面通知 / worktree 信息
+   *   等常在 `Stop` 之后到达，不能把已结束会话拉回 waiting/idle（lastMessage/updatedAt 仍照常更新）。
+   * - `permission` → `waiting`：真正等待用户授权（典型为岛不可用/超时回退到终端原生询问、由终端
+   *   弹出授权时）。这才是名副其实的「等待审批」。
+   * - `idle` → `idle`：仅是空闲等待输入，停在输入框，**不是审批**——不再误标 waiting。
+   * - `other`（worktree/登录/MCP 等信息通知，含无法识别）：**保留原状态**，绝不凭空标 waiting；
+   *   首次出现且无前态时落 `idle`（信息通知意味着会话已停在输入框边上）。
+   *
+   * 注：`waiting` 自此只由「授权请求」产生，故灵动岛收起态「等待审批」标签语义恒为准确，无需改渲染层。
+   */
+  private notificationStatus(message: string | undefined, prev?: SessionState): SessionStatus {
+    if (prev?.status === 'done' || prev?.status === 'error') return prev.status
+    switch (classifyNotification(message)) {
+      case 'permission':
+        return 'waiting'
+      case 'idle':
+        return 'idle'
+      default:
+        return prev?.status ?? 'idle'
+    }
   }
 
   /** 超过 MAX_SESSIONS 时驱逐最旧会话（按 updatedAt 升序），保留最近活跃的。 */

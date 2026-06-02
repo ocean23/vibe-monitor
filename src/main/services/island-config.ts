@@ -63,7 +63,9 @@ export async function ensureIslandConfig(
     const parsed = JSON.parse(raw) as unknown
     if (isValidConfig(parsed)) {
       const cfg: IslandConfig = { port: parsed.port, token: parsed.token }
-      if ((parsed as Record<string, unknown>).trustAll === true) cfg.trustAll = true
+      // parsed 已被 isValidConfig 收窄为 IslandConfig（含可选 trustAll），直接取字段即可。
+      // isValidConfig 只校验 port/token，故 trustAll 仍按 JSON 原值读取（缺省 = 不开启）。
+      if (parsed.trustAll === true) cfg.trustAll = true
       return cfg
     }
     // 文件存在但内容损坏：重新生成（下方写入覆盖）
