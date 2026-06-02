@@ -345,6 +345,52 @@ body.island-body {
   color: #9ca3af;
   font-size: 12px;
 }
+.island-panel-footer {
+  padding: 6px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+}
+.island-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #9ca3af;
+  font-size: 11px;
+  padding: 0;
+  transition: color 0.2s;
+}
+.island-toggle.on {
+  color: #d1fae5;
+}
+.island-toggle-track {
+  flex-shrink: 0;
+  width: 26px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 7px;
+  position: relative;
+  transition: background 0.2s;
+}
+.island-toggle.on .island-toggle-track {
+  background: #16a34a;
+}
+.island-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+.island-toggle.on .island-toggle-thumb {
+  transform: translateX(12px);
+}
 
 /* ---- 单会话卡片 ---- */
 .island-card {

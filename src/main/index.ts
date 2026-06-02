@@ -17,7 +17,7 @@ import { is } from '@electron-toolkit/utils'
 
 import { audit, setAuditRoot } from './audit-log'
 import { TRAY_ICON_DATA_URL } from './tray-icon'
-import { ensureIslandConfig } from './services/island-config'
+import { ensureIslandConfig, patchIslandConfig } from './services/island-config'
 import { IslandState } from './services/island-state'
 import { ApprovalRegistry } from './services/island-approval'
 import { createIslandServer, type IslandServer } from './services/island-server'
@@ -314,6 +314,11 @@ async function setupIsland(deps: {
 }): Promise<void> {
   try {
     const config = await ensureIslandConfig({ audit })
+    // 启动时把 settings.json 里的 trustAll 同步写入 island.json（hook 从此读取）
+    const initTrustAll = settingsService?.getSettings().trustAll === true
+    if (config.trustAll !== initTrustAll) {
+      await patchIslandConfig({ trustAll: initTrustAll })
+    }
 
     // 在创建窗口前检测刘海尺寸；失败时降级为顶部居中宽条模式
     islandNotchInfo = await detectNotchInfo()
@@ -528,6 +533,7 @@ function refreshTrayMenu(): void {
   const s = settingsService?.getSettings() ?? {}
   const currentTerm = resolveTerminalApp(s)
   const soundOn = s.islandSoundEnabled !== false
+  const trustAllOn = s.trustAll === true
   const loginOn = app.getLoginItemSettings().openAtLogin
 
   tray.setContextMenu(
@@ -556,6 +562,12 @@ function refreshTrayMenu(): void {
         type: 'checkbox',
         checked: soundOn,
         click: () => void saveSettingsPatch({ islandSoundEnabled: !soundOn })
+      },
+      {
+        label: '跳过审批',
+        type: 'checkbox',
+        checked: trustAllOn,
+        click: () => void saveSettingsPatch({ trustAll: !trustAllOn })
       },
       {
         label: '开机自启',
@@ -617,10 +629,11 @@ app.whenReady().then(async () => {
 
   await setupIsland({ launcher: launchToTerminal, getTerminalApp })
 
-  // settings 变更（来自托盘）→ 推送渲染端（音效开关等即时生效）+ 刷新托盘勾选态。
+  // settings 变更（来自托盘/渲染端）→ 推送渲染端（即时生效）+ 刷新托盘 + 同步 trustAll 到 island.json。
   settingsService.on('change', (s: Record<string, unknown>) => {
     islandWindow?.webContents.send('settings:changed', s)
     refreshTrayMenu()
+    void patchIslandConfig({ trustAll: s.trustAll === true })
   })
 
   createTray()

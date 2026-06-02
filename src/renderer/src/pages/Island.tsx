@@ -60,6 +60,8 @@ export function IslandRoot(): React.ReactElement {
   const hydrateSettings = useSettingsStore((s) => s.hydrate)
   const soundEnabled = useSettingsStore((s) => s.settings.islandSoundEnabled)
   const islandEnabled = useSettingsStore((s) => s.settings.islandEnabled)
+  const trustAll = useSettingsStore((s) => s.settings.trustAll)
+  const saveSettings = useSettingsStore((s) => s.save)
 
   const [hovered, setHovered] = useState(false)
   /** 主进程检测到的刘海几何（含黑条样式派生尺寸）；null=非刘海机型。 */
@@ -224,6 +226,18 @@ export function IslandRoot(): React.ReactElement {
               ) : (
                 sorted.map((s) => <IslandSessionCard key={s.sessionId} session={s} />)
               )}
+            </div>
+            <div className="island-panel-footer">
+              <button
+                className={'island-toggle' + (trustAll ? ' on' : '')}
+                onClick={() => void saveSettings({ trustAll: !trustAll })}
+                title={trustAll ? '已跳过所有审批（点击关闭）' : '点击开启：跳过所有审批'}
+              >
+                <span className="island-toggle-track">
+                  <span className="island-toggle-thumb" />
+                </span>
+                <span className="island-toggle-label">跳过审批</span>
+              </button>
             </div>
           </div>
         )}

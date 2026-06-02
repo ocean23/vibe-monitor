@@ -7,12 +7,15 @@ export interface AppSettings {
   islandEnabled: boolean
   /** 灵动岛状态切换 8-bit 音效开关。 */
   islandSoundEnabled: boolean
+  /** 跳过所有 PreToolUse 审批，等同于 --dangerously-skip-permissions 的岛内镜像。 */
+  trustAll: boolean
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
   terminalApp: 'Ghostty',
   islandEnabled: true,
-  islandSoundEnabled: true
+  islandSoundEnabled: true,
+  trustAll: false
 }
 
 interface SettingsState {

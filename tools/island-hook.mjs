@@ -229,9 +229,13 @@ async function main() {
 
   // PreToolUse：按权限模式分流
   if (kind === 'PreToolUse') {
-    // bypassPermissions / acceptEdits：用户已选择免询问，岛不打扰——直接放行，
+    // bypassPermissions / acceptEdits / trustAll：用户已选择免询问，岛不打扰——直接放行，
     // 仅 fire-and-forget 上报一条 running 状态（让岛在这类会话里也能显示活跃）。
-    if (permissionMode === 'bypassPermissions' || permissionMode === 'acceptEdits') {
+    if (
+      permissionMode === 'bypassPermissions' ||
+      permissionMode === 'acceptEdits' ||
+      cfg?.trustAll === true
+    ) {
       if (cfg) {
         try {
           await postJson(

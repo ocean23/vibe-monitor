@@ -73,7 +73,8 @@ export interface IpcMainHandleLike {
 const ALLOWED_SETTING_KEYS: Record<string, 'string' | 'boolean'> = {
   terminalApp: 'string',
   islandEnabled: 'boolean',
-  islandSoundEnabled: 'boolean'
+  islandSoundEnabled: 'boolean',
+  trustAll: 'boolean'
 }
 
 /** 仅保留白名单键且类型匹配的字段，其余忽略（SettingsService 本身保持通用，校验只在 IPC 边界做）。 */

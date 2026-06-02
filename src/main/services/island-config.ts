@@ -15,6 +15,8 @@ export interface IslandConfig {
   port: number
   /** 随机鉴权 token（hook 请求须携带 `Authorization: Bearer <token>`） */
   token: string
+  /** 跳过所有 PreToolUse 审批，等同于 --dangerously-skip-permissions 的岛内镜像 */
+  trustAll?: boolean
 }
 
 export interface EnsureIslandConfigOptions {
@@ -60,7 +62,9 @@ export async function ensureIslandConfig(
     const raw = await fs.readFile(filePath, 'utf-8')
     const parsed = JSON.parse(raw) as unknown
     if (isValidConfig(parsed)) {
-      return { port: parsed.port, token: parsed.token }
+      const cfg: IslandConfig = { port: parsed.port, token: parsed.token }
+      if ((parsed as Record<string, unknown>).trustAll === true) cfg.trustAll = true
+      return cfg
     }
     // 文件存在但内容损坏：重新生成（下方写入覆盖）
   } catch (err) {
@@ -85,6 +89,28 @@ export async function ensureIslandConfig(
     await fs.rm(tmp, { force: true }).catch(() => {})
   }
   return config
+}
+
+/**
+ * 原子更新 `~/.vibe-monitor/island.json` 中的指定字段（如 trustAll），
+ * 其余字段保持不变。文件不存在或解析失败时静默忽略（ensureIslandConfig 会在启动时处理）。
+ */
+export async function patchIslandConfig(
+  patch: Partial<IslandConfig>,
+  options: { rootDir?: string } = {}
+): Promise<void> {
+  const rootDir = options.rootDir ?? path.join(os.homedir(), '.vibe-monitor')
+  const filePath = path.join(rootDir, ISLAND_CONFIG_FILE)
+  try {
+    const raw = await fs.readFile(filePath, 'utf-8')
+    const existing = JSON.parse(raw) as Record<string, unknown>
+    const merged = { ...existing, ...patch }
+    const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`
+    await fs.writeFile(tmp, JSON.stringify(merged, null, 2), { encoding: 'utf-8', mode: 0o600 })
+    await fs.rename(tmp, filePath)
+  } catch {
+    /* 文件不存在 / 格式异常：忽略，不影响正常启动 */
+  }
 }
 
 /**
