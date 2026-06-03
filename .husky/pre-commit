@@ -1,1 +1,3 @@
+# 公开镜像仓护栏：先拦内部代号/内网 URL，再跑 lint-staged
+node tools/check-no-internal-refs.mjs
 pnpm lint-staged

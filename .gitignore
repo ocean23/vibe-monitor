@@ -9,12 +9,11 @@ coverage/
 package-lock.json
 *.tsbuildinfo
 
-.idea
+.idea/
 
-### sdd ###
-# 本地缓存与运行时元数据（不提交），团队共享知识（patterns.md / anti-patterns.md / best-practices.md / skills/）保留
-.sdd/task-state.json
-.sdd/telemetry.json
-.sdd/config.json
-.sdd/knowledge.db
-.sdd/dashboard.pid
+### 内部工具产物 —— 公开镜像仓一律不收录，防止内部 issue/digest/本机配置泄露 ###
+# .sdd / .sdd-work：sddworkflow 的 issue 蒸馏与工作笔记，含内网 GitLab 链接
+# .claude：本机 Claude Code 配置，含本地绝对路径
+.sdd/
+.sdd-work/
+.claude/
