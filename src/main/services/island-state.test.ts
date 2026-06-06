@@ -223,6 +223,84 @@ describe('island-state', () => {
     })
   })
 
+  describe('markActive (transcript 活跃心跳)', () => {
+    it('revives idle → running and refreshes updatedAt（消除长思考期误报空闲）', () => {
+      clock = 1000
+      state.applyEvent(evt({ kind: 'SessionStart' })) // idle @1000
+      clock = 5000
+      state.markActive('s1')
+      const s = state.list()[0]
+      expect(s.status).toBe('running')
+      expect(s.updatedAt).toBe(5000)
+    })
+
+    it('keeps running and refreshes updatedAt（续命）', () => {
+      clock = 1000
+      state.applyEvent(evt({ kind: 'PreToolUse' })) // running @1000
+      clock = 5000
+      state.markActive('s1')
+      expect(state.list()[0].status).toBe('running')
+      expect(state.list()[0].updatedAt).toBe(5000)
+    })
+
+    it('does not revive done; leaves updatedAt（Stop 后迟到的 transcript 写入不复活）', () => {
+      clock = 1000
+      state.applyEvent(evt({ kind: 'Stop' })) // done @1000
+      clock = 5000
+      state.markActive('s1')
+      const s = state.list()[0]
+      expect(s.status).toBe('done')
+      expect(s.updatedAt).toBe(1000)
+    })
+
+    it('preserves waiting but refreshes updatedAt（真·等待授权不被降为 running）', () => {
+      clock = 1000
+      state.applyEvent(evt({ kind: 'Notification', last_message: PERM_MSG })) // waiting
+      clock = 5000
+      state.markActive('s1')
+      const s = state.list()[0]
+      expect(s.status).toBe('waiting')
+      expect(s.updatedAt).toBe(5000)
+    })
+
+    it('ignores unknown session (does not create one)', () => {
+      state.markActive('ghost')
+      expect(state.count()).toBe(0)
+    })
+
+    it('idempotent at same tick on a running session (no extra change)', () => {
+      clock = 1000
+      state.applyEvent(evt({ kind: 'PreToolUse' })) // running @1000
+      const spy = vi.fn()
+      state.on('change', spy)
+      state.markActive('s1') // 同 tick、同态 → 无变更
+      expect(spy).not.toHaveBeenCalled()
+      expect(state.list()[0].status).toBe('running')
+    })
+
+    it('emits change on revive', () => {
+      clock = 1000
+      state.applyEvent(evt({ kind: 'SessionStart' })) // idle
+      const spy = vi.fn()
+      state.on('change', spy)
+      clock = 2000
+      state.markActive('s1')
+      expect(spy).toHaveBeenCalledTimes(1)
+      expect(state.list()[0].status).toBe('running')
+    })
+
+    it('spares a long-silent running session from stale downgrade', () => {
+      const stale = new IslandState({ audit, now: () => clock, staleMs: 1000 })
+      clock = 1000
+      stale.applyEvent(evt({ kind: 'PreToolUse' })) // running @1000
+      clock = 1900
+      stale.markActive('s1') // transcript 心跳刷新到 1900
+      clock = 1900 + 500 // 距上次活跃仅 500ms < staleMs
+      stale.sweepStale()
+      expect(stale.list()[0].status).toBe('running')
+    })
+  })
+
   describe('change events', () => {
     it('emits change on applyEvent with latest list', () => {
       const spy = vi.fn()

@@ -6,6 +6,7 @@ import type { AuditFn } from '../audit-log'
 import {
   parseTranscriptLine,
   parseLastMessage,
+  parseSessionId,
   createTranscriptWatcher,
   type TranscriptWatcher
 } from './transcript-watcher'
@@ -25,6 +26,16 @@ function assistantLine(sessionId: string, text: string): string {
     sessionId,
     cwd: '/x',
     message: { role: 'assistant', content: [{ type: 'text', text }] }
+  })
+}
+
+/** 思考块行：有 sessionId 但无 `type:'text'` 内容（parseLastMessage 取不到，但仍是活跃信号）。 */
+function thinkingLine(sessionId: string): string {
+  return jsonl({
+    type: 'assistant',
+    sessionId,
+    cwd: '/x',
+    message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'pondering…' }] }
   })
 }
 
@@ -89,6 +100,31 @@ describe('parseLastMessage', () => {
   })
 })
 
+describe('parseSessionId', () => {
+  it('extracts sessionId from a text line', () => {
+    expect(parseSessionId(assistantLine('s1', 'hi'))).toBe('s1')
+  })
+
+  it('extracts sessionId from a non-text line (thinking)', () => {
+    expect(parseSessionId(thinkingLine('s2'))).toBe('s2')
+  })
+
+  it('extracts sessionId from a tool_use line', () => {
+    const chunk = jsonl({ sessionId: 's3', message: { content: [{ type: 'tool_use' }] } })
+    expect(parseSessionId(chunk)).toBe('s3')
+  })
+
+  it('scans from the end past trailing meta lines lacking sessionId', () => {
+    const chunk = assistantLine('s4', 'real') + jsonl({ type: 'mode', mode: 'x' })
+    expect(parseSessionId(chunk)).toBe('s4')
+  })
+
+  it('returns null when no line carries a sessionId', () => {
+    expect(parseSessionId(jsonl({ type: 'mode' }) + jsonl({ x: 1 }))).toBeNull()
+    expect(parseSessionId('')).toBeNull()
+  })
+})
+
 describe('createTranscriptWatcher', () => {
   let tmp: string
   let audit: Mock<AuditFn>
@@ -120,6 +156,22 @@ describe('createTranscriptWatcher', () => {
     await fs.appendFile(f, assistantLine('s1', 'latest reply'))
     await waitFor(() => state.list()[0]?.lastMessage === 'latest reply')
     expect(state.list()[0].lastMessage).toBe('latest reply')
+  })
+
+  it('revives an idle session to running on a thinking-only append (no text)', async () => {
+    // 长思考期被 sweepStale 误降为 idle；transcript 只追加思考行（无可显示文本）也应复活为 running
+    state.applyEvent({ kind: 'SessionStart', session_id: 's1' }) // idle
+    expect(state.list()[0].status).toBe('idle')
+    const f = path.join(tmp, 's1.jsonl')
+    await fs.writeFile(f, thinkingLine('s1'))
+
+    watcher = createTranscriptWatcher({ projectsDir: tmp, state, audit })
+
+    await fs.appendFile(f, thinkingLine('s1'))
+    await waitFor(() => state.list()[0]?.status === 'running')
+    expect(state.list()[0].status).toBe('running')
+    // 无文本行 → lastMessage 不被设置（心跳只管保活/复活，不杜撰摘要）
+    expect(state.list()[0].lastMessage).toBeUndefined()
   })
 
   it('does not create a session for unknown sessionId', async () => {

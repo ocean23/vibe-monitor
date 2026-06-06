@@ -67,6 +67,29 @@ export function parseLastMessage(chunk: string): ParsedTranscriptLine | null {
   return null
 }
 
+/**
+ * 从一段 transcript 文本中取出 sessionId——**不要求该行有可显示文本**。
+ *
+ * 与 {@link parseLastMessage} 不同：思考块 / 工具调用 / 工具结果行都无 `type:'text'` 内容，
+ * parseLastMessage 会跳过它们；但这些行同样意味着「模型正在产出」。本函数从后往前找第一条带
+ * `sessionId` 的行（同一 transcript 文件内 sessionId 恒一致），供 {@link IslandState.markActive}
+ * 做活跃心跳——即便整段增量全是思考/工具行也能保活会话、复活被误降的 idle。
+ */
+export function parseSessionId(chunk: string): string | null {
+  const lines = chunk.split('\n')
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const trimmed = lines[i].trim()
+    if (!trimmed) continue
+    try {
+      const d = JSON.parse(trimmed) as Record<string, unknown>
+      if (typeof d.sessionId === 'string' && d.sessionId) return d.sessionId
+    } catch {
+      /* 跳过不可解析行 */
+    }
+  }
+  return null
+}
+
 export interface TranscriptWatcherDeps {
   /** 监听根目录，默认 `~/.claude/projects` */
   projectsDir: string
@@ -85,8 +108,10 @@ export interface TranscriptWatcher {
  * 追加的会话流，watch 其增量即可补足最后消息。用 Node 原生 `fs.watch(recursive)`，
  * **不引入 chokidar**——本仓运行时零依赖（见 plan 决策记录）。
  *
- * 按文件维护读取 offset，每次变化只读追加部分并解析最后一条文本行，调
- * `state.updateLastMessage`（仅更新已存在会话，不凭空创建——会话生命周期由 hook 主导）。
+ * 按文件维护读取 offset，每次变化只读追加部分：先据任意新增行提取 sessionId 调
+ * `state.markActive`（transcript 增量即活跃心跳——保活并把长思考期被误降的 idle 复活为 running，
+ * 消除「有任务在跑却显示空闲 / 响应不及时」），再解析最后一条文本行调 `state.updateLastMessage`
+ * 补摘要（两者都仅更新已存在会话，不凭空创建——会话生命周期由 hook 主导）。
  */
 export function createTranscriptWatcher(deps: TranscriptWatcherDeps): TranscriptWatcher {
   const { projectsDir, state, audit } = deps
@@ -166,6 +191,13 @@ export function createTranscriptWatcher(deps: TranscriptWatcherDeps): Transcript
       return
     }
     offsets.set(filePath, stat.size)
+
+    // transcript 任何新增都视为该会话「正在产出」→ 活跃心跳：保活并把（长思考期被 sweepStale 误降的）
+    // idle 即时复活为 running。思考块/工具调用/结果行无可显示文本，parseLastMessage 取不到，故独立用
+    // parseSessionId 提取 sessionId 先 markActive，再用最后一条文本行补 lastMessage（顺序无关：
+    // updateLastMessage 保留 markActive 刚设的 running 态）。
+    const sessionId = parseSessionId(chunk)
+    if (sessionId) state.markActive(sessionId)
 
     const parsed = parseLastMessage(chunk)
     if (parsed) {

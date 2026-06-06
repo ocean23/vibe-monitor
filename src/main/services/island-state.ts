@@ -11,16 +11,23 @@ import type {
 const MAX_SESSIONS = 200
 
 /**
- * running 会话陈旧阈值（ms）：超过此时长没有任何新事件即判定「已不再活跃」，降级为 idle。
+ * running 会话陈旧阈值（ms）：超过此时长没有任何活跃信号即判定「已不再活跃」，降级为 idle。
  *
- * 兜底以下「Stop 永远不来」的卡死场景（会话其实停在输入框，却一直显示运行中）：
+ * 「活跃信号」有二：hook 事件（{@link IslandState.applyEvent}）与 **transcript 增量**
+ * （{@link IslandState.markActive} / {@link IslandState.updateLastMessage} 刷新 updatedAt）。
+ * 后者是主力——只要 Claude Code 还在往会话 transcript 追加（思考块完成、工具调用、工具结果、回复
+ * 正文），markActive 就把会话保活并维持 running，故真正在干活的会话不会被误降。
+ *
+ * 本阈值是**最后兜底**，只在「连 transcript 都长时间无新增」时才触发，覆盖：
  *   - fire-and-forget 的 Stop 上报丢失（vibe-monitor 重启 / 端口忙 / 退出竞态）
- *   - 只改设置、不触发模型回合的斜杠命令（UserPromptSubmit 翻 running 后没有 Stop）
+ *   - 只改设置、不触发模型回合的斜杠命令（UserPromptSubmit 翻 running 后既无 Stop 也无 transcript 追加）
+ *   - 单个连续超长思考块（max-effort 深度推理整块完成才落盘，期间 transcript 无新字节）
  *
- * transcript-watcher 的 {@link IslandState.updateLastMessage} 会刷新 updatedAt，故真正在
- * 产出（有 transcript 追加）的会话不会被误降；仅「长时间静默且无 Stop」才会触发。
+ * 取 15min 而非更短：max-effort 单轮思考 / 单个长工具调用动辄数分钟，阈值过短会把正在干活的会话误判
+ * 空闲（曾用 3min，长思考期被反复误降为 idle 显示「空闲」）。代价仅是「真丢了 Stop」的死会话多滞留
+ * 一会儿，不误导。
  */
-const RUNNING_STALE_MS = 3 * 60_000
+const RUNNING_STALE_MS = 15 * 60_000
 
 /**
  * 会话过期阈值（ms）：非 running 会话超过此时长没有任何新事件 → 整条移除。
@@ -103,7 +110,8 @@ export interface IslandStateOptions {
  * 见 {@link notificationStatus}），而 `SessionEnd → 立即移除`（退出即清，不走过期阈值）。另有 {@link sweepStale}
  * 定时维护：把长时间无事件的 running 兜底降级为 idle（防止 Stop 丢失 / 斜杠命令导致永久卡在运行中），
  * 并把更久没动的非 running 会话整条移除（GC 掉连 SessionEnd 都没来的遗弃会话）。
- * transcript-watcher 通过 {@link updateLastMessage} 补「最后消息」明细。
+ * transcript-watcher 通过 {@link markActive} 把 transcript 增量当活跃心跳（保活 + 把长思考期被误降的
+ * idle 复活为 running），并通过 {@link updateLastMessage} 补「最后消息」明细。
  *
  * 每次变更 emit `change`（载荷为最新 `list()`），index.ts 订阅后 IPC 推送灵动岛窗口。
  * 不做持久化——灵动岛展示的是「当前活跃会话」，历史回溯仍走 claude-notify-store。
@@ -221,6 +229,37 @@ export class IslandState extends EventEmitter {
     if (!prev) return
     if (prev.lastMessage === lastMessage) return
     this.sessions.set(id, { ...prev, lastMessage, updatedAt: this.now() })
+    this.emitChange()
+  }
+
+  /**
+   * transcript 活跃心跳：会话的 transcript 有任何新增（思考块、工具调用/结果、回复正文等）即视为
+   * 「模型正在为该会话产出」——刷新 updatedAt 保活，并把 idle 拉回 running。
+   *
+   * 解决「长思考期无 hook 事件 → 被 {@link sweepStale} 误降级为 idle（灵动岛显示空闲）」：Claude Code
+   * 在模型思考期不发任何 hook，但会持续往 transcript 追加行（多为思考/工具行，无可显示文本，故
+   * {@link updateLastMessage} 不触发）。transcript-watcher 读到任何新增就调本方法，使「正在干活」与
+   * 「停在输入框」可区分，并让被误降的会话在下一次 transcript 增量时即时复活为 running（不必苦等下一个
+   * PreToolUse，消除「响应不及时」）。
+   *
+   * - **done / error**：直接返回不动（与 {@link notificationStatus} 同护栏）。Stop 后迟到的本轮
+   *   transcript 写入（如收尾正文行经 fs.watch 略晚于 Stop hook 到达）不得把已结束会话复活为 running。
+   * - **waiting**：真·等待授权（PreToolUse 阻塞中，模型并未产出），保留状态不改，仅刷新 updatedAt。
+   * - **idle / running**：→ running（idle 即时复活、running 续命），刷新 updatedAt。
+   *
+   * 仅作用于已存在会话（不凭空创建——生命周期由 hook 主导，同 {@link updateLastMessage}）。
+   * 同态同时刻重复调用幂等（不重复 emit）。
+   */
+  markActive(sessionId: string): void {
+    const id = sessionId.trim()
+    if (!id) return
+    const prev = this.sessions.get(id)
+    if (!prev) return
+    if (prev.status === 'done' || prev.status === 'error') return
+    const status: SessionStatus = prev.status === 'waiting' ? 'waiting' : 'running'
+    const now = this.now()
+    if (prev.status === status && prev.updatedAt === now) return
+    this.sessions.set(id, { ...prev, status, updatedAt: now })
     this.emitChange()
   }
 
