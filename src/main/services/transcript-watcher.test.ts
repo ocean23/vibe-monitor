@@ -7,6 +7,7 @@ import {
   parseTranscriptLine,
   parseLastMessage,
   parseSessionId,
+  chunkHasUserActivity,
   createTranscriptWatcher,
   type TranscriptWatcher
 } from './transcript-watcher'
@@ -125,6 +126,30 @@ describe('parseSessionId', () => {
   })
 })
 
+describe('chunkHasUserActivity', () => {
+  it('true for a user tool_result line', () => {
+    const line = jsonl({
+      type: 'user',
+      sessionId: 's',
+      message: { role: 'user', content: [{ type: 'tool_result' }] }
+    })
+    expect(chunkHasUserActivity(line)).toBe(true)
+  })
+
+  it('true for a user string-content line (new prompt)', () => {
+    expect(chunkHasUserActivity(userLine('s', 'hi'))).toBe(true)
+  })
+
+  it('false for assistant-only lines (thinking / text)', () => {
+    expect(chunkHasUserActivity(thinkingLine('s') + assistantLine('s', 'x'))).toBe(false)
+  })
+
+  it('false for empty / meta-only chunk', () => {
+    expect(chunkHasUserActivity('')).toBe(false)
+    expect(chunkHasUserActivity(jsonl({ type: 'mode' }))).toBe(false)
+  })
+})
+
 describe('createTranscriptWatcher', () => {
   let tmp: string
   let audit: Mock<AuditFn>
@@ -172,6 +197,37 @@ describe('createTranscriptWatcher', () => {
     expect(state.list()[0].status).toBe('running')
     // 无文本行 → lastMessage 不被设置（心跳只管保活/复活，不杜撰摘要）
     expect(state.list()[0].lastMessage).toBeUndefined()
+  })
+
+  it('clears waiting only on a user tool_result append (model-only append preserves waiting)', async () => {
+    // 模拟 AskUserQuestion：会话置 waiting → 模型侧思考行保持 waiting → 用户回答(tool_result)转 running
+    state.applyEvent({
+      kind: 'Notification',
+      session_id: 's1',
+      last_message: 'Claude needs your permission to use AskUserQuestion'
+    })
+    expect(state.list()[0].status).toBe('waiting')
+    const f = path.join(tmp, 's1.jsonl')
+    await fs.writeFile(f, thinkingLine('s1'))
+
+    watcher = createTranscriptWatcher({ projectsDir: tmp, state, audit })
+
+    // 纯模型侧产出（思考块）：保持 waiting
+    await fs.appendFile(f, thinkingLine('s1'))
+    await new Promise((r) => setTimeout(r, 150))
+    expect(state.list()[0].status).toBe('waiting')
+
+    // 用户回答（tool_result，user 行）：解除 → running
+    await fs.appendFile(
+      f,
+      jsonl({
+        type: 'user',
+        sessionId: 's1',
+        message: { role: 'user', content: [{ type: 'tool_result' }] }
+      })
+    )
+    await waitFor(() => state.list()[0]?.status === 'running')
+    expect(state.list()[0].status).toBe('running')
   })
 
   it('does not create a session for unknown sessionId', async () => {

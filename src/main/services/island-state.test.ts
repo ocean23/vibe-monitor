@@ -253,14 +253,41 @@ describe('island-state', () => {
       expect(s.updatedAt).toBe(1000)
     })
 
-    it('preserves waiting but refreshes updatedAt（真·等待授权不被降为 running）', () => {
+    it('preserves waiting on model-only activity, NOT refreshing updatedAt（留 sweepStale 兜底）', () => {
       clock = 1000
-      state.applyEvent(evt({ kind: 'Notification', last_message: PERM_MSG })) // waiting
+      state.applyEvent(evt({ kind: 'Notification', last_message: PERM_MSG })) // waiting @1000
       clock = 5000
-      state.markActive('s1')
+      state.markActive('s1') // userActivity 默认 false：思考/正文/tool_use 等模型侧产出
       const s = state.list()[0]
       expect(s.status).toBe('waiting')
+      expect(s.updatedAt).toBe(1000) // 未刷新
+    })
+
+    it('clears waiting → running on user activity（用户已回答/授权，模型恢复）', () => {
+      clock = 1000
+      state.applyEvent(evt({ kind: 'Notification', last_message: PERM_MSG })) // waiting @1000
+      clock = 5000
+      state.markActive('s1', true) // tool_result / 回答 → 用户侧产出
+      const s = state.list()[0]
+      expect(s.status).toBe('running')
       expect(s.updatedAt).toBe(5000)
+    })
+
+    it('AskUserQuestion 全流程：待答期保持 waiting，用户回答后即时转 running', () => {
+      // 模型抛出问题 → Notification 置 waiting
+      clock = 1000
+      state.applyEvent(evt({ kind: 'Notification', last_message: PERM_MSG })) // waiting
+      // 触发问题的 tool_use 行被 watcher 读到（模型侧，userActivity=false）：不得误清 waiting（入场竞态防护）
+      clock = 1010
+      state.markActive('s1', false)
+      expect(state.list()[0].status).toBe('waiting')
+      // 待答期模型静默；即便很久也保持 waiting（updatedAt 不被模型侧刷新）
+      expect(state.list()[0].updatedAt).toBe(1000)
+      // 用户回答（tool_result，userActivity=true）：即时转 running（不必等 8 分钟思考后的 PreToolUse）
+      clock = 180_000
+      state.markActive('s1', true)
+      expect(state.list()[0].status).toBe('running')
+      expect(state.list()[0].updatedAt).toBe(180_000)
     })
 
     it('ignores unknown session (does not create one)', () => {

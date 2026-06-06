@@ -110,8 +110,8 @@ export interface IslandStateOptions {
  * 见 {@link notificationStatus}），而 `SessionEnd → 立即移除`（退出即清，不走过期阈值）。另有 {@link sweepStale}
  * 定时维护：把长时间无事件的 running 兜底降级为 idle（防止 Stop 丢失 / 斜杠命令导致永久卡在运行中），
  * 并把更久没动的非 running 会话整条移除（GC 掉连 SessionEnd 都没来的遗弃会话）。
- * transcript-watcher 通过 {@link markActive} 把 transcript 增量当活跃心跳（保活 + 把长思考期被误降的
- * idle 复活为 running），并通过 {@link updateLastMessage} 补「最后消息」明细。
+ * transcript-watcher 通过 {@link markActive} 把 transcript 增量当活跃心跳（保活、把长思考期被误降的
+ * idle 复活为 running、并在用户应答后解除 waiting），并通过 {@link updateLastMessage} 补「最后消息」明细。
  *
  * 每次变更 emit `change`（载荷为最新 `list()`），index.ts 订阅后 IPC 推送灵动岛窗口。
  * 不做持久化——灵动岛展示的是「当前活跃会话」，历史回溯仍走 claude-notify-store。
@@ -234,32 +234,40 @@ export class IslandState extends EventEmitter {
 
   /**
    * transcript 活跃心跳：会话的 transcript 有任何新增（思考块、工具调用/结果、回复正文等）即视为
-   * 「模型正在为该会话产出」——刷新 updatedAt 保活，并把 idle 拉回 running。
+   * 「模型正在为该会话产出」——刷新 updatedAt 保活，把 idle 复活为 running，并在用户应答后解除 waiting。
    *
-   * 解决「长思考期无 hook 事件 → 被 {@link sweepStale} 误降级为 idle（灵动岛显示空闲）」：Claude Code
-   * 在模型思考期不发任何 hook，但会持续往 transcript 追加行（多为思考/工具行，无可显示文本，故
-   * {@link updateLastMessage} 不触发）。transcript-watcher 读到任何新增就调本方法，使「正在干活」与
-   * 「停在输入框」可区分，并让被误降的会话在下一次 transcript 增量时即时复活为 running（不必苦等下一个
-   * PreToolUse，消除「响应不及时」）。
+   * 解决两类「有任务在跑却报错状态」：
+   *   1. **长思考期显示空闲**：Claude Code 在模型思考期不发任何 hook，但会持续往 transcript 追加行
+   *      （多为思考/工具行，无可显示文本，故 {@link updateLastMessage} 不触发）。读到任何新增即把被
+   *      {@link sweepStale} 误降的 idle 即时复活为 running（不必苦等下一个 PreToolUse，消除「响应不及时」）。
+   *   2. **用户已回答却仍显示等待审批**：AskUserQuestion / 授权请求经 Notification 置 waiting；用户回答
+   *      是一条 `tool_result`（user 行）而**不触发任何 hook**，下一个 PreToolUse 可能在数分钟的 max-effort
+   *      思考之后才来。故据 `userActivity` 判定：有用户侧产出新行即解除 waiting → running。
    *
-   * - **done / error**：直接返回不动（与 {@link notificationStatus} 同护栏）。Stop 后迟到的本轮
-   *   transcript 写入（如收尾正文行经 fs.watch 略晚于 Stop hook 到达）不得把已结束会话复活为 running。
-   * - **waiting**：真·等待授权（PreToolUse 阻塞中，模型并未产出），保留状态不改，仅刷新 updatedAt。
+   * @param userActivity 本次 transcript 增量是否含「用户侧产出」的行（tool_result / 回答 / 新 prompt，
+   *   由 transcript-watcher 的 chunkHasUserActivity 判定）。
+   *
+   * - **done / error**：直接返回不动（与 {@link notificationStatus} 同护栏）。Stop 后迟到的本轮 transcript
+   *   写入（如收尾正文行经 fs.watch 略晚于 Stop hook 到达）不得把已结束会话复活为 running。
+   * - **waiting + 仅模型侧产出（userActivity=false）**：保留 waiting 且**不刷新 updatedAt**。既防入场竞态
+   *   （触发等待的 tool_use 行被 watcher 读到时把刚置的 waiting 误清），又把「长时间无人应答」留给
+   *   {@link sweepStale} 兜底降级。真·等待期间模型本就不产出，此分支几乎只在入场竞态命中。
+   * - **waiting + 用户侧产出（userActivity=true）**：→ running（用户已回答/授权，模型恢复），刷新 updatedAt。
    * - **idle / running**：→ running（idle 即时复活、running 续命），刷新 updatedAt。
    *
    * 仅作用于已存在会话（不凭空创建——生命周期由 hook 主导，同 {@link updateLastMessage}）。
-   * 同态同时刻重复调用幂等（不重复 emit）。
+   * running 同时刻重复调用幂等（不重复 emit）。
    */
-  markActive(sessionId: string): void {
+  markActive(sessionId: string, userActivity = false): void {
     const id = sessionId.trim()
     if (!id) return
     const prev = this.sessions.get(id)
     if (!prev) return
     if (prev.status === 'done' || prev.status === 'error') return
-    const status: SessionStatus = prev.status === 'waiting' ? 'waiting' : 'running'
+    if (prev.status === 'waiting' && !userActivity) return
     const now = this.now()
-    if (prev.status === status && prev.updatedAt === now) return
-    this.sessions.set(id, { ...prev, status, updatedAt: now })
+    if (prev.status === 'running' && prev.updatedAt === now) return
+    this.sessions.set(id, { ...prev, status: 'running', updatedAt: now })
     this.emitChange()
   }
 

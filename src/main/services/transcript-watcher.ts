@@ -90,6 +90,29 @@ export function parseSessionId(chunk: string): string | null {
   return null
 }
 
+/**
+ * 判断一段 transcript 增量里是否含「用户侧产出」的行（`type:'user'` 或 `message.role:'user'`）。
+ *
+ * 工具结果 / AskUserQuestion 的回答 / 新 prompt 在 transcript 里都是 user 行；而思考块、回复正文、
+ * 工具调用是 assistant 行。供 {@link IslandState.markActive} 区分「真·等待中的会话是否已被用户操作
+ * 解除」：只有用户侧新行才证明用户已回答/授权、模型即将恢复 → 解除 waiting；纯模型侧产出不解除
+ * （并借此避开「触发等待的 tool_use 行被读到时误清刚置的 waiting」这一入场竞态）。
+ */
+export function chunkHasUserActivity(chunk: string): boolean {
+  for (const line of chunk.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    try {
+      const d = JSON.parse(trimmed) as { type?: unknown; message?: { role?: unknown } }
+      if (d.type === 'user') return true
+      if (d.message && typeof d.message === 'object' && d.message.role === 'user') return true
+    } catch {
+      /* 跳过不可解析行 */
+    }
+  }
+  return false
+}
+
 export interface TranscriptWatcherDeps {
   /** 监听根目录，默认 `~/.claude/projects` */
   projectsDir: string
@@ -195,9 +218,10 @@ export function createTranscriptWatcher(deps: TranscriptWatcherDeps): Transcript
     // transcript 任何新增都视为该会话「正在产出」→ 活跃心跳：保活并把（长思考期被 sweepStale 误降的）
     // idle 即时复活为 running。思考块/工具调用/结果行无可显示文本，parseLastMessage 取不到，故独立用
     // parseSessionId 提取 sessionId 先 markActive，再用最后一条文本行补 lastMessage（顺序无关：
-    // updateLastMessage 保留 markActive 刚设的 running 态）。
+    // updateLastMessage 保留 markActive 刚设的 running 态）。chunkHasUserActivity 告知是否含用户侧产出
+    // （tool_result / 回答），仅此才解除 waiting——见 {@link IslandState.markActive}。
     const sessionId = parseSessionId(chunk)
-    if (sessionId) state.markActive(sessionId)
+    if (sessionId) state.markActive(sessionId, chunkHasUserActivity(chunk))
 
     const parsed = parseLastMessage(chunk)
     if (parsed) {
