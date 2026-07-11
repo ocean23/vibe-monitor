@@ -153,3 +153,27 @@ diff 里，便于回溯。
 - 五、测试与工程效率：无 CI（pre-commit 不跑 tsc/vitest）；`Island.tsx` 死代码
   `COLLAPSED_FALLBACK`；状态色三处硬编码 hex 未提取 CSS 变量；TypeScript/eslint/vite
   依赖落后一个大版本。
+
+## 实际执行方式（偏离 writing-plans 标准流程，记录原因）
+
+写完本文档后，原计划是转入 `writing-plans` 生成详细任务清单，再由用户选择
+subagent-driven 或 inline 方式执行。但工作块 A 涉及判别式联合类型这种需要真实
+TypeScript 编译器验证的设计决策（`stopReason` 在联合类型分支间的访问收窄等），
+为了确保写进计划里的代码不是臆造的伪代码，直接在真实代码里做了一版实现并跑通
+typecheck/lint/test。工作块 A 验证完毕后，用户明确选择"直接提交，继续用同样方式
+做 D/C/B"，即放弃预先写详细 plan 文档、改为每个工作块"直接实现 → 验证
+（typecheck+lint+test，工作块 B 额外做了 dev 模式真机冒烟测试）→ 提交"的方式
+逐块推进。
+
+四个工作块均已完成并提交：
+
+- `01caade` fix: 非刘海机型灵动岛黑条高度校准（本轮优化之前的原始 bug 修复，见对话开头）
+- `ab579f6` fix: 工作块 A（状态机终态守卫统一）
+- `c1c121a` fix: 工作块 D（安全/健壮性加固）
+- `8590311` refactor: 工作块 C（渲染端重构）
+- `30501de` refactor: 工作块 B（index.ts 拆分）
+
+工作块 B 验证过程中，用户实际截图发现了两个本文档未预见的连带问题（黑条高度从
+写死值改为按实机菜单栏高度动态计算后，`.island-pill-runner` 图标固定尺寸与黑条
+不成比例、整体偏下），已一并修在 `30501de` 里，属于本轮优化触发的真实回归，不是
+计划外加戏。
