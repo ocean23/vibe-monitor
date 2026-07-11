@@ -64,8 +64,10 @@ export function IslandRoot(): React.ReactElement {
   const saveSettings = useSettingsStore((s) => s.save)
 
   const [hovered, setHovered] = useState(false)
-  /** 主进程检测到的刘海几何（含黑条样式派生尺寸）；null=非刘海机型。 */
+  /** 主进程检测到的刘海几何（含黑条样式派生尺寸）；hasNotch=false 时仅 height 是该屏实测
+   *  菜单栏高（供 fallback 黑条校准尺寸），不做贴刘海造型；null=检测彻底失败（非 macOS）。 */
   const [notchInfo, setNotchInfo] = useState<{
+    hasNotch: boolean
     width: number
     cornerRadius: number
     height: number
@@ -163,7 +165,7 @@ export function IslandRoot(): React.ReactElement {
     // 展开态：测量内容高度回传（含刘海占位 spacer），上限随刘海占位上浮
     const el = contentRef.current
     const width = hasApproval ? APPROVAL_WIDTH : PANEL_WIDTH
-    const maxExpandH = notchInfo ? 640 + notchInfo.topInset : 640
+    const maxExpandH = notchInfo?.hasNotch ? 640 + notchInfo.topInset : 640
     const height = Math.max(48, Math.min(el ? Math.ceil(el.scrollHeight) : 200, maxExpandH))
     const last = lastSizeRef.current
     if (last && last.mode === 'expanded' && last.width === width && last.height === height) return
@@ -193,7 +195,7 @@ export function IslandRoot(): React.ReactElement {
       <div className="island-content" ref={contentRef}>
         {!expanded && (
           <div
-            className={'island-pill ' + (notchInfo ? 'notch ' : '') + label.cls}
+            className={'island-pill ' + (notchInfo?.hasNotch ? 'notch ' : '') + label.cls}
             onMouseEnter={() => setHovered(true)}
           >
             <span className="island-pill-status">
@@ -203,14 +205,18 @@ export function IslandRoot(): React.ReactElement {
                 <span className="island-pill-dot" aria-hidden="true" />
               )}
               {/* 刘海黑条空间有限，省略文案标签，状态色足以传达信息 */}
-              {!notchInfo && label.text && <span className="island-pill-label">{label.text}</span>}
+              {!notchInfo?.hasNotch && label.text && (
+                <span className="island-pill-label">{label.text}</span>
+              )}
             </span>
             <span className="island-pill-count">{sessions.length} sessions</span>
           </div>
         )}
 
         {/* 展开态刘海占位：顶部透明区域（高=刘海高），让面板从刘海正下方弹出 */}
-        {expanded && notchInfo && <div className="island-notch-spacer" aria-hidden="true" />}
+        {expanded && notchInfo?.hasNotch && (
+          <div className="island-notch-spacer" aria-hidden="true" />
+        )}
 
         {expanded && hasApproval && <IslandApprovalPanel request={pending[0]} />}
 

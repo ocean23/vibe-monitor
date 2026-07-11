@@ -32,6 +32,7 @@ const api = {
   /** 查询刘海几何 + 渲染派生尺寸（黑条高/底-左圆角/内容右让位 overlap/展开占位 topInset）。 */
   islandGetNotchInfo: () =>
     ipcRenderer.invoke('island:getNotchInfo') as Promise<{
+      hasNotch: boolean
       width: number
       cornerRadius: number
       height: number

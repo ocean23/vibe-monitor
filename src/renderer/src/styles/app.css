@@ -175,6 +175,9 @@ body.island-body {
 }
 
 /* ---- 收起态 pill（非刘海降级：屏幕顶部居中黑条） ---- */
+/* 高度用 --notch-h（主进程按该屏实测菜单栏高注入，非刘海机型也会注入其真实值），不再写死
+   38px——写死值与外接显示器等真实菜单栏高（常见 ~24px）不符，黑条会比菜单栏高出一截、
+   盖进下方窗口内容（用户反馈：灵动岛高度与浏览器窗口没对齐）。 */
 .island-pill {
   position: relative;
   display: flex;
@@ -182,7 +185,7 @@ body.island-body {
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  height: 38px;
+  height: var(--notch-h, 38px);
   margin: 0;
   padding: 0 16px;
   background: var(--island-surface);

@@ -89,12 +89,17 @@ function runCommand(
 
 /** 刘海/Dynamic Island 物理参数（macOS 12+ 通过 JXA 精确读取，否则估算）。 */
 interface NotchInfo {
-  /** 刘海宽（pt）= 屏宽 - 左右菜单栏辅助区宽 */
+  /** true=真实物理刘海（贴刘海左侧、连成长方形）；false=无刘海机型，仅借这份结构体
+   *  回传该屏实测菜单栏高，供收起态黑条校准高度（不做贴刘海的黑条造型）。 */
+  hasNotch: boolean
+  /** 刘海宽（pt）= 屏宽 - 左右菜单栏辅助区宽；非刘海机型无意义，恒为 0 */
   width: number
   /** 黑条底-左外圆角（pt） */
   cornerRadius: number
   /** 刘海高（pt）= 左侧菜单栏辅助区高 / safeAreaInsets.top —— 黑条用这个高度即与刘海齐平。
-   *  实测 = 菜单栏高（本机 16" MBP 为 38pt，约等于 Electron workArea.y=39）。 */
+   *  实测 = 菜单栏高（本机 16" MBP 为 38pt，约等于 Electron workArea.y=39）。
+   *  非刘海机型：直接是该屏实测菜单栏高（如外接显示器 ~24pt），黑条按此收起，不再用写死的
+   *  46px 默认值——否则黑条比真实菜单栏高出一大截，视觉上盖进下方窗口内容（用户反馈）。 */
   height: number
 }
 let islandNotchInfo: NotchInfo | null = null
@@ -192,18 +197,27 @@ async function detectNotchInfo(): Promise<NotchInfo | null> {
   // JXA 明确测到刘海（辅助区存在 → 宽高都 > 0）：用实测值
   if (notchW > 0 && notchH > 0) {
     return {
+      hasNotch: true,
       width: Math.round(notchW),
       cornerRadius: 10,
       height: Math.round(notchH)
     }
   }
 
-  // 兜底：JXA 不可用时用内建屏 workArea.y 判定是否刘海机型（普通菜单栏 ≤ 30pt）。
-  // 刘海高 ≈ 菜单栏高（实测两者基本相等：本机 auxArea.h=38 ≈ workArea.y=39）。
+  // 兜底：JXA 不可用 / 无刘海辅助区（如 Mac mini 外接显示器）时，用该屏 workArea.y 判定
+  // 是否刘海机型（普通菜单栏 ≤ 30pt）。刘海高 ≈ 菜单栏高（实测两者基本相等：本机
+  // auxArea.h=38 ≈ workArea.y=39）。
   const menuBarH = notchDisplay.workArea.y
-  if (menuBarH <= 30) return null
+  if (menuBarH <= 30) {
+    // 非刘海机型：仍把实测菜单栏高带回去（hasNotch:false），供收起态黑条按此校准高度。
+    // 之前这里直接 return null 把 menuBarH 丢弃，黑条只能退回写死的 46px 默认值，比外接
+    // 显示器真实菜单栏（约 24px）高出近一倍，视觉上盖进下方窗口内容（用户反馈：灵动岛高度
+    // 与浏览器窗口没对齐）。
+    return { hasNotch: false, width: 0, cornerRadius: 0, height: menuBarH }
+  }
   void audit('island.notch_detect_estimated', { menuBarH })
   return {
+    hasNotch: true,
     width: notchDisplay.bounds.width >= 1600 ? 220 : 160,
     cornerRadius: 10,
     height: menuBarH
@@ -213,7 +227,7 @@ async function detectNotchInfo(): Promise<NotchInfo | null> {
 /** 收起态黑条窗口左上角 + 尺寸：始终锚定刘海所在的内建屏（与主屏无关），贴刘海左侧、等高。 */
 function collapsedBounds(): { x: number; y: number; width: number; height: number } {
   const disp = getNotchDisplay()
-  if (islandNotchInfo) {
+  if (islandNotchInfo?.hasNotch) {
     const { x: sx, y: sy, width: sw } = disp.bounds
     // 刘海水平居中于内建屏 → 其左缘 X。黑条主体宽 COLLAPSED_BAR_WIDTH，右缘钻进刘海背后
     // BAR_OVERLAP（盖住接缝）；左缘再外延 BAR_SHOULDER 给凹形肩 melt 的透明空间。
@@ -323,9 +337,13 @@ async function setupIsland(deps: {
     // 在创建窗口前检测刘海尺寸；失败时降级为顶部居中宽条模式
     islandNotchInfo = await detectNotchInfo()
     if (islandNotchInfo) {
-      // 收起态黑条：贴刘海左侧、与刘海等高。窗口 = 黑条宽 + 钻进刘海背后的 overlap × 刘海高。
-      ISLAND_WIDTH = COLLAPSED_BAR_WIDTH + BAR_OVERLAP
+      // 无论是否真刘海，都用实测高度校准收起态黑条高度——非刘海机型（如外接显示器）也有
+      // 自己的真实菜单栏高，不能再退回写死的 46px 默认值。
       ISLAND_COLLAPSED_HEIGHT = islandNotchInfo.height
+      if (islandNotchInfo.hasNotch) {
+        // 收起态黑条：贴刘海左侧、与刘海等高。窗口 = 黑条宽 + 钻进刘海背后的 overlap。
+        ISLAND_WIDTH = COLLAPSED_BAR_WIDTH + BAR_OVERLAP
+      }
     }
 
     const state = new IslandState({ audit })
@@ -427,7 +445,7 @@ async function setupIsland(deps: {
       const h = num(a.height, ISLAND_COLLAPSED_HEIGHT, 900)
       const { x: sx, y: sy, width: sw } = disp.bounds
       let x: number
-      if (islandNotchInfo) {
+      if (islandNotchInfo?.hasNotch) {
         // 与收起态黑条同左缘，向右下展开；右溢出则左移夹住，保证整窗在内建屏内
         const notchLeftX = sx + sw / 2 - islandNotchInfo.width / 2
         const barLeftX = Math.round(notchLeftX - COLLAPSED_BAR_WIDTH)
@@ -459,8 +477,10 @@ async function setupIsland(deps: {
           if (!islandWindow) return
           islandNotchInfo = await detectNotchInfo()
           if (islandNotchInfo) {
-            ISLAND_WIDTH = COLLAPSED_BAR_WIDTH + BAR_SHOULDER + BAR_OVERLAP
             ISLAND_COLLAPSED_HEIGHT = islandNotchInfo.height
+            if (islandNotchInfo.hasNotch) {
+              ISLAND_WIDTH = COLLAPSED_BAR_WIDTH + BAR_SHOULDER + BAR_OVERLAP
+            }
           }
           islandWindow.setBounds(collapsedBounds())
           // 几何变了 → 重新下发给渲染端刷新 CSS 变量（刘海宽高可能已变）

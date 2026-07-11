@@ -25,6 +25,7 @@ declare global {
       onSettingsChanged: (cb: (settings: Partial<AppSettings>) => void) => () => void
       // ── 灵动岛 ──
       islandGetNotchInfo: () => Promise<{
+        hasNotch: boolean
         width: number
         cornerRadius: number
         height: number
