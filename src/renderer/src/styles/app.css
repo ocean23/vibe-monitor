@@ -13,6 +13,20 @@ body,
   width: 100%;
   height: 100%;
 }
+:root {
+  /* 刘海几何变量的唯一默认值声明点（运行时由 useNotchInfo 通过
+     document.documentElement.style.setProperty 覆盖，见 lib/use-notch-info.ts）。
+     此前这些默认值同时也写在 .island-root 规则里，导致 .island-root 自身的直接声明
+     恒定压过从 <html> 继承来的运行时值——JS 设置的真实高度永远不生效，黑条 CSS 高度
+     卡死在默认值 38px（凑巧和原开发者本机刘海高度一致才没被发现），与主进程已正确
+     计算的真实窗口高度不一致，窗口把多出的部分裁掉，导致内容看起来贴底。 */
+  --notch-h: 38px;
+  --bar-radius: 10px;
+  --bar-overlap: 28px;
+  --bar-shoulder: 3px;
+  --bar-shoulder-h: 10px;
+  --notch-topinset: 0px;
+}
 body {
   font-family: var(--font-ui);
   /* 透明窗口：无内容时不画底色，由 island-body 显式置透明 */
@@ -151,14 +165,10 @@ body.island-body {
   font-family: var(--font-ui);
   /* 岛体统一表面色：与刘海/Dynamic Island 硬件纯黑完全一致 */
   --island-surface: #000000;
-  /* 以下刘海几何变量由渲染端运行时从主进程注入（见 Island.tsx）；
-     此处默认值仅用于无法检测刘海时（非刘海机型）的顶部宽条降级。 */
-  --notch-h: 38px; /* 黑条高（= 刘海实高 / 菜单栏高，运行时由主进程注入；本机 38pt） */
-  --bar-radius: 10px; /* 黑条底-左凸圆角半径（运行时由主进程注入 cornerRadius） */
-  --bar-overlap: 28px; /* 黑条右端钻进刘海背后的像素（内容右 padding 让位） */
-  --bar-shoulder: 3px; /* 左上椭圆凹肩「水平」半径（= 左侧透明预留宽；极小→几乎不外扩） */
-  --bar-shoulder-h: 10px; /* 左上椭圆凹肩「垂直」半径（> 水平半径 → 仅顶部一点点圆，仿原生右肩） */
-  --notch-topinset: 0px; /* 展开态面板上方透明占位高（= 完整菜单栏高） */
+  /* 刘海几何变量（--notch-h 等）不在这里声明默认值——它们由 useNotchInfo 运行时写在
+     document.documentElement 上，若这里也声明一份，会恒定压过从 <html> 继承来的运行时
+     值（子元素自身的直接声明优先于祖先继承，与哪个后设置无关），JS 注入的真实值就永远
+     生效不了。默认值唯一声明在 :root（见文件顶部），这里让它自然继承。 */
 }
 
 .island-content {
@@ -265,6 +275,12 @@ body.island-body {
 }
 .island-pill-runner svg {
   display: block;
+  /* lottie-web 默认按动画原始画布尺寸设置 svg 的 width/height 属性（本素材 1920×1080），
+   * 不会自动贴合容器实际大小；容器收窄到 --notch-h 级别后，svg 自身仍按原尺寸占位，
+   * 内容（含腿部）就会溢出容器下沿。强制铺满容器，画面内容交给 viewBox +
+   * preserveAspectRatio（IslandRunner.tsx 的 cropToFigure）去缩放，不会变形。 */
+  width: 100%;
+  height: 100%;
 }
 /* 刘海黑条：跑步小人放大到「超过」黑条高并踩出下沿，显著变大。
    盒子高 = 黑条高 + 10：margin-bottom:-10 抵消多出的高度，使 flex 居中后小人顶贴黑条顶
