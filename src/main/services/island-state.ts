@@ -4,6 +4,7 @@ import type {
   IslandHookEvent,
   IslandHookKind,
   SessionState,
+  SessionStateBase,
   SessionStatus
 } from '../../shared/island-types'
 
@@ -91,6 +92,32 @@ export function classifyNotification(message: string | undefined): NotificationK
   return 'other'
 }
 
+/**
+ * done/error 是终态：一旦进入，不可被后续事件/心跳复活。类型谓词——真值分支里
+ * `s.stopReason` 可安全访问（已收窄到 done/error 分支）。
+ */
+export function isTerminalStatus(
+  s: SessionState
+): s is SessionState & { status: 'done' | 'error'; stopReason?: string } {
+  return s.status === 'done' || s.status === 'error'
+}
+
+/**
+ * 状态迁移的统一守卫——所有「候选下一状态」都要经这里：已处于终态的会话拒绝任何变更，
+ * 返回原状态；否则放行候选值。
+ *
+ * `applyEvent` 主链路（此前是唯一遗漏这道守卫的入口——SessionStart/UserPromptSubmit/
+ * PreToolUse/Stop 等静态映射事件可以直接把已结束会话拉回 running）与 `notificationStatus`
+ * 的分类结果，都在这里统一收口，不再各自零散判断（近三次相关 fix 的共同根因）。
+ */
+export function resolveTransition(
+  prev: SessionState | undefined,
+  candidate: SessionStatus
+): SessionStatus {
+  if (prev && isTerminalStatus(prev)) return prev.status
+  return candidate
+}
+
 export interface IslandStateOptions {
   audit: AuditFn
   /** 注入时钟，便于单测断言 updatedAt */
@@ -153,51 +180,67 @@ export class IslandState extends EventEmitter {
     }
     const prev = this.sessions.get(sessionId)
     // Notification 不走静态映射：其触发原因繁多（工具授权请求 / 空闲等输入 / worktree·登录·MCP
-    // 等纯信息通知），只有「授权请求」才是真正的等待审批。按 message 分类裁决（{@link
-    // notificationStatus}，内含 done/error 护栏）；其余 kind 用静态 KIND_TO_STATUS。
-    const status =
+    // 等纯信息通知），只有「授权请求」才是真正的等待审批。按 message 分类出候选状态（{@link
+    // notificationStatus}）；其余 kind 用静态 KIND_TO_STATUS 出候选状态。候选状态是否真的生效，
+    // 统一交给下面的 {@link resolveTransition} 裁决（终态守卫）。
+    const candidateStatus =
       event.kind === 'Notification'
         ? this.notificationStatus(event.last_message, prev)
         : KIND_TO_STATUS[event.kind]
-    if (!status) {
+    if (!candidateStatus) {
       void this.audit('island.event_unknown_kind', { kind: event.kind, sessionId })
       return
     }
+    const status = resolveTransition(prev, candidateStatus)
     const now = event.ts ?? this.now()
-    const next: SessionState = {
+    const base: SessionStateBase = {
       sessionId,
       // 新字段优先取事件值，缺省时保留旧值（hook 各节点携带字段不全）
       projectName: event.project_name ?? prev?.projectName,
       sessionName: event.session_name ?? prev?.sessionName,
-      status,
       lastMessage: event.last_message ?? prev?.lastMessage,
       model: event.model ?? prev?.model,
       terminal: event.terminal ?? prev?.terminal,
       updatedAt: now,
       // 首次出现的时间戳，跨事件保留——「已持续时长」从这里算起，不随每次事件刷新
-      startedAt: prev?.startedAt ?? now,
-      stopReason: event.kind === 'Stop' ? (event.stop_reason ?? prev?.stopReason) : prev?.stopReason
+      startedAt: prev?.startedAt ?? now
     }
+    const next: SessionState =
+      status === 'done' || status === 'error'
+        ? {
+            ...base,
+            status,
+            // 本轮若真是 Stop 事件，用它携带的 stop_reason（哪怕是 undefined，也不再回退
+            // 沿用上一轮的过期值——修复 stopReason 跨轮次残留）；非 Stop 事件（迟到事件被
+            // resolveTransition 钉在终态）不携带理由信息，保留 prev 原值，不清空。
+            stopReason:
+              event.kind === 'Stop'
+                ? event.stop_reason
+                : prev && isTerminalStatus(prev)
+                  ? prev.stopReason
+                  : undefined
+          }
+        : { ...base, status }
     this.sessions.set(sessionId, next)
     this.evictIfNeeded()
     this.emitChange()
   }
 
   /**
-   * 把一条 Notification 裁决为会话状态——从根上消除「会话并未等待审批却显示等待审批」的误报。
+   * 把一条 Notification 分类为候选状态——从根上消除「会话并未等待审批却显示等待审批」的误报。
    *
-   * - **已 done/error 的会话**：任何 Notification 都不改状态。任务完成桌面通知 / worktree 信息
-   *   等常在 `Stop` 之后到达，不能把已结束会话拉回 waiting/idle（lastMessage/updatedAt 仍照常更新）。
    * - `permission` → `waiting`：真正等待用户授权（典型为岛不可用/超时回退到终端原生询问、由终端
    *   弹出授权时）。这才是名副其实的「等待审批」。
    * - `idle` → `idle`：仅是空闲等待输入，停在输入框，**不是审批**——不再误标 waiting。
    * - `other`（worktree/登录/MCP 等信息通知，含无法识别）：**保留原状态**，绝不凭空标 waiting；
    *   首次出现且无前态时落 `idle`（信息通知意味着会话已停在输入框边上）。
    *
-   * 注：`waiting` 自此只由「授权请求」产生，故灵动岛收起态「等待审批」标签语义恒为准确，无需改渲染层。
+   * 注：候选状态是否真的生效（如已 done/error 的会话任何 Notification 都不改状态，仅
+   * lastMessage/updatedAt 照常更新）由调用方经 {@link resolveTransition} 统一裁决，这里
+   * 不再重复判断。`waiting` 自此只由「授权请求」产生，故灵动岛收起态「等待审批」标签语义
+   * 恒为准确，无需改渲染层。
    */
   private notificationStatus(message: string | undefined, prev?: SessionState): SessionStatus {
-    if (prev?.status === 'done' || prev?.status === 'error') return prev.status
     switch (classifyNotification(message)) {
       case 'permission':
         return 'waiting'
@@ -263,7 +306,7 @@ export class IslandState extends EventEmitter {
     if (!id) return
     const prev = this.sessions.get(id)
     if (!prev) return
-    if (prev.status === 'done' || prev.status === 'error') return
+    if (isTerminalStatus(prev)) return
     if (prev.status === 'waiting' && !userActivity) return
     const now = this.now()
     if (prev.status === 'running' && prev.updatedAt === now) return

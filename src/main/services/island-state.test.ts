@@ -80,6 +80,7 @@ describe('island-state', () => {
       state.applyEvent(evt({ kind: 'Stop', stop_reason: 'end_turn' }))
       const s = state.list()[0]
       expect(s.status).toBe('done')
+      if (s.status !== 'done') throw new Error('unreachable')
       expect(s.stopReason).toBe('end_turn')
     })
 
@@ -103,6 +104,46 @@ describe('island-state', () => {
       })
       state.applyEvent(evt({ kind: 'Notification' }))
       expect(state.list()[0].status).toBe('error')
+    })
+
+    it('PreToolUse after Stop does not revive the session (静态映射事件此前唯一遗漏终态守卫的入口)', () => {
+      state.applyEvent(evt({ kind: 'Stop' }))
+      expect(state.list()[0].status).toBe('done')
+      // 迟到的 PreToolUse（如子进程收尾时序竞态）不得把已结束会话拉回 running
+      state.applyEvent(evt({ kind: 'PreToolUse' }))
+      expect(state.list()[0].status).toBe('done')
+    })
+
+    it('UserPromptSubmit after Stop does not revive the session', () => {
+      state.applyEvent(evt({ kind: 'Stop' }))
+      state.applyEvent(evt({ kind: 'UserPromptSubmit' }))
+      expect(state.list()[0].status).toBe('done')
+    })
+
+    it('SessionStart after Stop does not revive the session', () => {
+      state.applyEvent(evt({ kind: 'Stop' }))
+      state.applyEvent(evt({ kind: 'SessionStart' }))
+      expect(state.list()[0].status).toBe('done')
+    })
+
+    it('a fresh Stop without stop_reason does not fall back to the previous round’s reason (跨轮次残留)', () => {
+      state.applyEvent(evt({ kind: 'Stop', stop_reason: 'end_turn' }))
+      // 同一 session_id 复用（如 resume）→ 新一轮 UserPromptSubmit 之后再次 Stop，这次没带 reason
+      state.applyEvent(evt({ kind: 'SessionStart' }))
+      state.applyEvent(evt({ kind: 'Stop' }))
+      const s = state.list()[0]
+      expect(s.status).toBe('done')
+      if (s.status !== 'done') throw new Error('unreachable')
+      expect(s.stopReason).toBeUndefined()
+    })
+
+    it('a stray non-Stop event after done preserves the prior stop_reason (不被迟到事件清空)', () => {
+      state.applyEvent(evt({ kind: 'Stop', stop_reason: 'end_turn' }))
+      state.applyEvent(evt({ kind: 'PreToolUse' })) // 迟到事件被守卫拦下，status 仍是 done
+      const s = state.list()[0]
+      expect(s.status).toBe('done')
+      if (s.status !== 'done') throw new Error('unreachable')
+      expect(s.stopReason).toBe('end_turn')
     })
   })
 

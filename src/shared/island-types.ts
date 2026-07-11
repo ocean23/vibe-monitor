@@ -59,12 +59,11 @@ export interface IslandHookEvent {
   ts?: number
 }
 
-/** 灵动岛展示的单会话状态（state.list() 的元素，经 IPC 下发渲染端）。 */
-export interface SessionState {
+/** SessionState 各状态共有的字段（与 status/stopReason 无关）。 */
+export interface SessionStateBase {
   sessionId: string
   projectName?: string
   sessionName?: string
-  status: SessionStatus
   /** 最近一条消息摘要（hook last_message 或 transcript-watcher 补） */
   lastMessage?: string
   /** 最近一次状态更新时间（毫秒），用于排序与相对时间展示 */
@@ -75,9 +74,18 @@ export interface SessionState {
   model?: string
   /** 会话所在终端（如 'Ghostty'、'Ghostty·tmux'），卡片标签展示 */
   terminal?: string
-  /** done 状态的停止原因 */
-  stopReason?: string
 }
+
+/**
+ * 灵动岛展示的单会话状态（state.list() 的元素，经 IPC 下发渲染端）。
+ *
+ * 判别式联合：`stopReason` 只在 done/error 分支存在——从类型层面防止「状态已变但旧字段
+ * 残留」这类问题（如 stopReason 跨轮次残留）。idle/running/waiting 三态不携带停止原因，
+ * 分到同一分支（互相之间没有字段差异，拆成三个分支只会重复代码，无实际类型收益）。
+ */
+export type SessionState =
+  | (SessionStateBase & { status: 'idle' | 'running' | 'waiting' })
+  | (SessionStateBase & { status: 'done' | 'error'; stopReason?: string })
 
 /** 岛内审批的三档裁决，对齐 Image#6 三按钮。 */
 export type ApprovalDecision = 'deny' | 'allow_once' | 'bypass'
