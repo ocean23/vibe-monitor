@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import crypto from 'node:crypto'
+import pLimit from 'p-limit'
 import type { AuditFn } from '../audit-log'
 
 /** 灵动岛环回 HTTP 端口（固定）。同机其他进程伪造事件由 token 拦截。 */
@@ -93,26 +94,34 @@ export async function ensureIslandConfig(
   return config
 }
 
+// 串行化所有 patchIslandConfig 调用（同进程内全局唯一一份 island.json）：读-改-写不加锁
+// 的话，两次几乎同时的 patch 会互相踩掉对方的改动（后写的整份覆盖先写的，先写那次的字段
+// 丢失）。pLimit(1) 把并发调用排成队列，同一时刻只有一次读-改-写在跑。
+const patchQueue = pLimit(1)
+
 /**
  * 原子更新 `~/.vibe-monitor/island.json` 中的指定字段（如 trustAll），
- * 其余字段保持不变。文件不存在或解析失败时静默忽略（ensureIslandConfig 会在启动时处理）。
+ * 其余字段保持不变。文件不存在或解析失败时忽略（ensureIslandConfig 会在启动时处理），
+ * 但会经 `options.audit`（若提供）留痕——此前完全静默，写失败无从排查。
  */
 export async function patchIslandConfig(
   patch: Partial<IslandConfig>,
-  options: { rootDir?: string } = {}
+  options: { rootDir?: string; audit?: AuditFn } = {}
 ): Promise<void> {
-  const rootDir = options.rootDir ?? path.join(os.homedir(), '.vibe-monitor')
-  const filePath = path.join(rootDir, ISLAND_CONFIG_FILE)
-  try {
-    const raw = await fs.readFile(filePath, 'utf-8')
-    const existing = JSON.parse(raw) as Record<string, unknown>
-    const merged = { ...existing, ...patch }
-    const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`
-    await fs.writeFile(tmp, JSON.stringify(merged, null, 2), { encoding: 'utf-8', mode: 0o600 })
-    await fs.rename(tmp, filePath)
-  } catch {
-    /* 文件不存在 / 格式异常：忽略，不影响正常启动 */
-  }
+  return patchQueue(async () => {
+    const rootDir = options.rootDir ?? path.join(os.homedir(), '.vibe-monitor')
+    const filePath = path.join(rootDir, ISLAND_CONFIG_FILE)
+    try {
+      const raw = await fs.readFile(filePath, 'utf-8')
+      const existing = JSON.parse(raw) as Record<string, unknown>
+      const merged = { ...existing, ...patch }
+      const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`
+      await fs.writeFile(tmp, JSON.stringify(merged, null, 2), { encoding: 'utf-8', mode: 0o600 })
+      await fs.rename(tmp, filePath)
+    } catch (err) {
+      await options.audit?.('island.config_patch_failed', { error: (err as Error).message })
+    }
+  })
 }
 
 /**

@@ -4,6 +4,7 @@ import path from 'node:path'
 import os from 'node:os'
 import {
   ensureIslandConfig,
+  patchIslandConfig,
   timingSafeTokenEqual,
   ISLAND_DEFAULT_PORT,
   ISLAND_CONFIG_FILE
@@ -54,6 +55,38 @@ describe('island-config', () => {
     await fs.writeFile(path.join(tmp, ISLAND_CONFIG_FILE), JSON.stringify({ port: 1 }), 'utf-8')
     const cfg = await ensureIslandConfig({ rootDir: tmp, randomToken: () => 'tok-recovered' })
     expect(cfg.token).toBe('tok-recovered')
+  })
+
+  describe('patchIslandConfig', () => {
+    it('merges a patch into the existing config', async () => {
+      await ensureIslandConfig({ rootDir: tmp, randomToken: () => 'tok-a' })
+      await patchIslandConfig({ trustAll: true }, { rootDir: tmp })
+      const onDisk = JSON.parse(await fs.readFile(path.join(tmp, ISLAND_CONFIG_FILE), 'utf-8'))
+      expect(onDisk).toEqual({ port: ISLAND_DEFAULT_PORT, token: 'tok-a', trustAll: true })
+    })
+
+    it('serializes concurrent patches so neither write is lost', async () => {
+      await ensureIslandConfig({ rootDir: tmp, randomToken: () => 'tok-b' })
+      await Promise.all([
+        patchIslandConfig({ trustAll: true }, { rootDir: tmp }),
+        patchIslandConfig({ port: 9999 }, { rootDir: tmp })
+      ])
+      const onDisk = JSON.parse(await fs.readFile(path.join(tmp, ISLAND_CONFIG_FILE), 'utf-8'))
+      expect(onDisk.trustAll).toBe(true)
+      expect(onDisk.port).toBe(9999)
+    })
+
+    it('audits when the config file does not exist yet, without throwing', async () => {
+      const auditSpy = vi.fn().mockResolvedValue(undefined)
+      await expect(
+        patchIslandConfig({ trustAll: true }, { rootDir: tmp, audit: auditSpy })
+      ).resolves.toBeUndefined()
+      expect(auditSpy).toHaveBeenCalledWith('island.config_patch_failed', expect.any(Object))
+    })
+
+    it('does not throw when audit is omitted and the file is missing', async () => {
+      await expect(patchIslandConfig({ trustAll: true }, { rootDir: tmp })).resolves.toBeUndefined()
+    })
   })
 
   describe('timingSafeTokenEqual', () => {

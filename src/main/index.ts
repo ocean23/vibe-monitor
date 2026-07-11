@@ -331,7 +331,7 @@ async function setupIsland(deps: {
     // 启动时把 settings.json 里的 trustAll 同步写入 island.json（hook 从此读取）
     const initTrustAll = settingsService?.getSettings().trustAll === true
     if (config.trustAll !== initTrustAll) {
-      await patchIslandConfig({ trustAll: initTrustAll })
+      await patchIslandConfig({ trustAll: initTrustAll }, { audit })
     }
 
     // 在创建窗口前检测刘海尺寸；失败时降级为顶部居中宽条模式
@@ -653,7 +653,7 @@ app.whenReady().then(async () => {
   settingsService.on('change', (s: Record<string, unknown>) => {
     islandWindow?.webContents.send('settings:changed', s)
     refreshTrayMenu()
-    void patchIslandConfig({ trustAll: s.trustAll === true })
+    void patchIslandConfig({ trustAll: s.trustAll === true }, { audit })
   })
 
   createTray()

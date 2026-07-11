@@ -29,6 +29,10 @@ const HOOK_EVENTS = [
   'SessionEnd'
 ]
 const HOOK_SCRIPT_MARKER = 'island-hook.mjs'
+// island-hook.mjs 自身在 65s 兜底降级（见该文件注释）；这里显式写 70s 留出余量，避免
+// Claude Code 用更短的默认 hook 超时提前 kill 掉 hook 进程，导致「绝不阻塞用户」的安全
+// 网失效（超时字段缺失时 Claude Code 的默认值不受本工具控制）。
+const HOOK_TIMEOUT_SECONDS = 70
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const hookScriptPath = path.join(here, HOOK_SCRIPT_MARKER)
@@ -62,19 +66,34 @@ function hasIslandHook(group) {
 
 /**
  * 纯函数：把灵动岛 hook 幂等合并进 settings 对象，返回新对象（不改原对象）。
+ * 已存在的 island hook 条目会就地把 timeout 补齐/校正为 {@link HOOK_TIMEOUT_SECONDS}
+ * （自愈旧安装——早期安装的条目没有这个字段），不会重复添加新条目。
  * 导出以便单测。
  */
 export function mergeIslandHooks(settings, command) {
   const next = { ...settings, hooks: { ...(settings.hooks || {}) } }
   for (const event of HOOK_EVENTS) {
     const group = Array.isArray(next.hooks[event]) ? [...next.hooks[event]] : []
-    if (!hasIslandHook(group)) {
+    if (hasIslandHook(group)) {
+      next.hooks[event] = group.map((entry) => {
+        if (!Array.isArray(entry?.hooks)) return entry
+        const hooks = entry.hooks.map((h) =>
+          typeof h?.command === 'string' && h.command.includes(HOOK_SCRIPT_MARKER)
+            ? { ...h, timeout: HOOK_TIMEOUT_SECONDS }
+            : h
+        )
+        return { ...entry, hooks }
+      })
+    } else {
       // matcher 空串 = 匹配全部（Claude Code 约定）。PreToolUse/PostToolUse 的 matcher 按
       // 正则匹配 tool_name，`'*'` 是非法正则（quantifier 无目标）会被跳过；用户既有 hook
       // 亦用 ''。非工具事件（UserPromptSubmit/Stop/Notification/SessionStart）忽略 matcher。
-      group.push({ matcher: '', hooks: [{ type: 'command', command }] })
+      group.push({
+        matcher: '',
+        hooks: [{ type: 'command', command, timeout: HOOK_TIMEOUT_SECONDS }]
+      })
+      next.hooks[event] = group
     }
-    next.hooks[event] = group
   }
   return next
 }

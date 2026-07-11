@@ -150,6 +150,44 @@ describe('island-server', () => {
     expect(res.status).toBe(405)
   })
 
+  it('rejects requests once the per-second rate limit is exceeded (429)', async () => {
+    const results = await Promise.all(
+      Array.from({ length: 35 }, () =>
+        post(server.port, '/event', { kind: 'PreToolUse', session_id: 's1' }, 'secret-token')
+      )
+    )
+    const statuses = results.map((r) => r.status)
+    expect(statuses.filter((s) => s === 200).length).toBeLessThanOrEqual(30)
+    expect(statuses.some((s) => s === 429)).toBe(true)
+  })
+
+  it('rejects /approval once the pending cap is exceeded (429), without touching the registry', async () => {
+    // 先堆到上限（全部不裁决，长期挂起）
+    const pendingPromises = Array.from({ length: 20 }, (_, i) =>
+      post(
+        server.port,
+        '/approval',
+        { session_id: `s${i}`, tool_name: 'Bash', tool_input: 'x' },
+        'secret-token'
+      )
+    )
+    // 等这 20 个真正登记进 registry（HTTP 请求到达 + register 同步执行）
+    await new Promise((r) => setTimeout(r, 50))
+    expect(registry.pending().length).toBe(20)
+    // 第 21 个应被立即拒绝，不进 registry
+    const { status } = await post(
+      server.port,
+      '/approval',
+      { session_id: 'over-cap', tool_name: 'Bash', tool_input: 'x' },
+      'secret-token'
+    )
+    expect(status).toBe(429)
+    expect(registry.pending().length).toBe(20)
+    // 清理：drain 掉悬挂请求，避免残留计时器影响其它用例
+    registry.drain()
+    await Promise.all(pendingPromises)
+  })
+
   it('clips over-long /event string fields before storing', async () => {
     const huge = 'x'.repeat(5000)
     await post(

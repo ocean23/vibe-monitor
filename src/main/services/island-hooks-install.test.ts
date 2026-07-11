@@ -21,6 +21,25 @@ describe('island-hooks-install merge logic', () => {
     }
   })
 
+  it('writes an explicit 70s timeout on every new hook entry', () => {
+    const out = mergeIslandHooks({}, CMD)
+    for (const ev of EVENTS) {
+      expect(out.hooks[ev][0].hooks[0].timeout).toBe(70)
+    }
+  })
+
+  it('self-heals a pre-existing island entry that lacks a timeout (old install)', () => {
+    const oldInstall = {
+      hooks: {
+        PreToolUse: [{ matcher: '', hooks: [{ type: 'command', command: CMD }] }]
+      }
+    }
+    const out = mergeIslandHooks(oldInstall, CMD)
+    // 就地补齐 timeout，且不重复添加条目
+    expect(out.hooks.PreToolUse).toHaveLength(1)
+    expect(out.hooks.PreToolUse[0].hooks[0].timeout).toBe(70)
+  })
+
   it('is idempotent — running twice does not duplicate entries', () => {
     const once = mergeIslandHooks({}, CMD)
     const twice = mergeIslandHooks(once, CMD)

@@ -15,6 +15,22 @@ const MAX_TOOL_INPUT_CHARS = 8_000
 /** /event 入库字符串字段（project/session/last_message/stop_reason）长度上限。 */
 const MAX_FIELD_CHARS = 500
 
+/**
+ * 限流窗口（ms）与每窗口最大请求数：token 只挡住了「没有 token 的进程」，同机同用户下
+ * 拿到 token（读 island.json）的其它进程仍可批量灌 /event、/approval——加一道频率上限
+ * 兜底，超限直接 429，防止刷会话把真实活跃会话挤出内存 / UI。真实 hook 流量远低于此
+ * （单会话每次工具调用一条事件），30/s 对正常使用绰绰有余。
+ */
+const RATE_LIMIT_WINDOW_MS = 1000
+const MAX_REQUESTS_PER_WINDOW = 30
+
+/**
+ * /approval 未决队列上限：ApprovalRegistry 本身不设上限，灌入大量不裁决的假审批请求会
+ * 让灵动岛堆满伪造的审批卡片（UI 欺骗）且每条占用到 60s 超时前的内存。超限直接 429，
+ * 不进入 registry（不 emit request，不推送 UI）。
+ */
+const MAX_PENDING_APPROVALS = 20
+
 /** 截断入库字符串字段，缺失返回 undefined（不存入 "undefined" 字面量）。 */
 function clipField(value: unknown): string | undefined {
   if (value === undefined || value === null) return undefined
@@ -113,6 +129,19 @@ export function createIslandServer(deps: IslandServerDeps): Promise<IslandServer
   // 关闭有界（review P2-6；实测仅 server.closeAllConnections() 不足以即时切断 keep-alive）。
   const sockets = new Set<import('node:net').Socket>()
 
+  // 固定窗口限流状态：每 RATE_LIMIT_WINDOW_MS 重置一次计数。
+  let rateWindowStart = Date.now()
+  let rateWindowCount = 0
+  function withinRateLimit(): boolean {
+    const now = Date.now()
+    if (now - rateWindowStart >= RATE_LIMIT_WINDOW_MS) {
+      rateWindowStart = now
+      rateWindowCount = 0
+    }
+    rateWindowCount++
+    return rateWindowCount <= MAX_REQUESTS_PER_WINDOW
+  }
+
   const server = http.createServer((req, res) => {
     void handle(req, res).catch(async (err) => {
       await audit('island.server_handler_error', { error: (err as Error).message })
@@ -142,6 +171,14 @@ export function createIslandServer(deps: IslandServerDeps): Promise<IslandServer
 
     if (req.method !== 'POST') {
       sendJson(res, 405, { ok: false, error: 'method not allowed' })
+      return
+    }
+
+    // 限流：token 只挡住没有凭证的进程，同机拿到 token 的进程仍可能刷量——超过窗口上限
+    // 一律拒绝，不区分端点（/event、/approval 共用同一个全局计数）。
+    if (!withinRateLimit()) {
+      await audit('island.rate_limited', { url: req.url ?? '' })
+      sendJson(res, 429, { ok: false, error: 'rate limited' })
       return
     }
 
@@ -204,6 +241,13 @@ export function createIslandServer(deps: IslandServerDeps): Promise<IslandServer
     const toolName = String(body?.tool_name ?? '')
     if (!sessionId || !toolName) {
       sendJson(res, 400, { ok: false, error: 'invalid approval request' })
+      return
+    }
+    // 未决审批队列上限：灌入大量不裁决的假请求会把灵动岛堆满伪造审批卡片，且每条占用到
+    // 60s 超时前的内存——超限直接拒绝，不进 registry（不 emit request，不推送 UI）。
+    if (registry.pending().length >= MAX_PENDING_APPROVALS) {
+      await audit('island.approval_queue_full', { sessionId, toolName })
+      sendJson(res, 429, { ok: false, error: 'approval queue full' })
       return
     }
     const input: RegisterApprovalInput = {
