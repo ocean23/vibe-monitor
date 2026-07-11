@@ -1,17 +1,14 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useShallow } from 'zustand/react/shallow'
-import { useIslandStore, selectStatusCounts, STATUS_URGENCY } from '../store/island-store'
+import React, { useEffect, useMemo, useState } from 'react'
+import { useIslandStore, selectMostUrgentStatus, STATUS_URGENCY } from '../store/island-store'
 import { useSettingsStore } from '../store/settings-store'
 import type { SessionState, SessionStatus } from '../../../shared/island-types'
 import { IslandSessionCard } from '../components/IslandSessionCard'
 import { IslandApprovalPanel } from '../components/IslandApprovalPanel'
 import { IslandRunner } from '../components/IslandRunner'
-import { playStatusSound } from '../lib/island-sound'
-
-/** 非刘海机型的降级尺寸 */
-const COLLAPSED_FALLBACK = { width: 520, height: 46 }
-const PANEL_WIDTH = 640
-const APPROVAL_WIDTH = 560
+import { useNotchInfo } from '../lib/use-notch-info'
+import { useIslandSound } from '../lib/use-island-sound'
+import { useIslandResize } from '../lib/use-island-resize'
+import { useMouseIgnore } from '../lib/use-mouse-ignore'
 
 /** 排序：紧急度（waiting > error > running > done > idle）降序，同级按最近活跃倒序。 */
 function sortSessions(sessions: SessionState[]): SessionState[] {
@@ -21,20 +18,26 @@ function sortSessions(sessions: SessionState[]): SessionState[] {
   })
 }
 
-/** 收起态最紧急状态 → pill 文案/样式。 */
-function collapsedLabel(
-  counts: Record<SessionStatus, number>,
-  total: number
-): {
+/** 收起态 pill 各状态对应的文案（刘海机型省略文案，仅用状态色传达）。 */
+const STATUS_LABEL_TEXT: Record<SessionStatus, string> = {
+  waiting: '等待审批',
+  error: '出错',
+  running: 'Working…',
+  done: '完成',
+  idle: '空闲'
+}
+
+/**
+ * 收起态最紧急状态 → pill 文案/样式。最紧急状态本身由 store 的 `selectMostUrgentStatus`
+ * 统一裁决（与展开面板 `sortSessions` 共用同一份 `STATUS_URGENCY` 优先级），这里只做
+ * 「状态 → 文案」的映射，不再重复判断优先级。
+ */
+function collapsedLabel(mostUrgent: SessionStatus | null): {
   text: string
   cls: SessionStatus | 'idle'
 } {
-  if (counts.waiting > 0) return { text: '等待审批', cls: 'waiting' }
-  if (counts.error > 0) return { text: '出错', cls: 'error' }
-  if (counts.running > 0) return { text: 'Working…', cls: 'running' }
-  if (counts.done > 0) return { text: '完成', cls: 'done' }
-  if (total > 0) return { text: '空闲', cls: 'idle' }
-  return { text: '', cls: 'idle' }
+  if (mostUrgent === null) return { text: '', cls: 'idle' }
+  return { text: STATUS_LABEL_TEXT[mostUrgent], cls: mostUrgent }
 }
 
 /**
@@ -45,17 +48,16 @@ function collapsedLabel(
  * - hover 展开：聚合面板，列出所有活跃会话卡片（点击跳回终端）
  * - 审批态：收到 PreToolUse 审批请求时自动展开审批面板（优先级高于 hover）
  *
- * 通过 islandResize 把内容尺寸回传主进程调整窗口；状态切换为 waiting/done/error
- * 时播放 8-bit 音效（托盘可关）。
+ * 刘海几何获取（useNotchInfo）、状态音效（useIslandSound）、窗口尺寸回传
+ * （useIslandResize）、点击穿透（useMouseIgnore）拆成独立 hook，本组件只负责
+ * 订阅 store + 组装渲染。
  */
 export function IslandRoot(): React.ReactElement {
   const hydrate = useIslandStore((s) => s.hydrate)
   const subscribe = useIslandStore((s) => s.subscribe)
   const sessions = useIslandStore((s) => s.sessions)
   const pending = useIslandStore((s) => s.pending)
-  // useShallow：selectStatusCounts 每次返回新对象，不做浅比较的话每条 IPC 推送都会让
-  // 整个置顶岛重渲（即便计数没变）。浅比较后仅在某个状态计数真正变化时才触发重渲。
-  const counts = useIslandStore(useShallow(selectStatusCounts))
+  const mostUrgent = useIslandStore(selectMostUrgentStatus)
 
   const hydrateSettings = useSettingsStore((s) => s.hydrate)
   const soundEnabled = useSettingsStore((s) => s.settings.islandSoundEnabled)
@@ -64,24 +66,9 @@ export function IslandRoot(): React.ReactElement {
   const saveSettings = useSettingsStore((s) => s.save)
 
   const [hovered, setHovered] = useState(false)
-  /** 主进程检测到的刘海几何（含黑条样式派生尺寸）；hasNotch=false 时仅 height 是该屏实测
-   *  菜单栏高（供 fallback 黑条校准尺寸），不做贴刘海造型；null=检测彻底失败（非 macOS）。 */
-  const [notchInfo, setNotchInfo] = useState<{
-    hasNotch: boolean
-    width: number
-    cornerRadius: number
-    height: number
-    overlap: number
-    shoulder: number
-    shoulderH: number
-    topInset: number
-    barWidth: number
-  } | null>(null)
-  const contentRef = useRef<HTMLDivElement>(null)
-  /** 上次回传主进程的窗口请求（按 收起/展开 + 尺寸 去重，跳过重复 islandResize IPC）。 */
-  const lastSizeRef = useRef<{ mode: string; width: number; height: number } | null>(null)
+  const { info: notchInfo, loaded: notchLoaded } = useNotchInfo()
 
-  // 启动：加载数据 + 订阅推送 + 加载设置 + 订阅托盘设置变更 + 读取刘海参数
+  // 启动：加载数据 + 订阅推送 + 加载设置 + 订阅托盘设置变更
   useEffect(() => {
     void hydrate()
     void hydrateSettings()
@@ -89,58 +76,13 @@ export function IslandRoot(): React.ReactElement {
     const offSettings = window.electronAPI?.onSettingsChanged?.((s) =>
       useSettingsStore.getState().applyExternal(s)
     )
-    // 读取主进程检测到的刘海几何，注入 CSS 变量，让黑条与刘海等高、底-左圆角、连成长方形。
-    // --notch-h：黑条高(=刘海高)；--bar-radius：黑条底-左凸圆角；--bar-overlap：右端钻进
-    // 刘海背后的像素（内容右 padding 让位）；--notch-topinset：展开态面板上方透明占位。
-    const loadNotch = (): void => {
-      void window.electronAPI?.islandGetNotchInfo?.().then((info) => {
-        if (!info) return
-        setNotchInfo(info)
-        const root = document.documentElement
-        root.style.setProperty('--notch-h', `${info.height}px`)
-        root.style.setProperty('--bar-radius', `${info.cornerRadius}px`)
-        root.style.setProperty('--bar-overlap', `${info.overlap}px`)
-        root.style.setProperty('--bar-shoulder', `${info.shoulder}px`)
-        root.style.setProperty('--bar-shoulder-h', `${info.shoulderH}px`)
-        root.style.setProperty('--notch-topinset', `${info.topInset}px`)
-      })
-    }
-    loadNotch()
-    // 显示器拓扑变化（插拔外接屏 / 改分辨率）→ 主进程已把岛拉回内建屏，渲染端重取几何刷新 CSS
-    const offNotch = window.electronAPI?.onIslandNotchChanged?.(loadNotch)
     return () => {
       unsub()
       offSettings?.()
-      offNotch?.()
     }
   }, [hydrate, subscribe, hydrateSettings])
 
-  // 音效：会话状态切换为 waiting/done/error 时播放；记录上一次每会话状态
-  const prevStatusRef = useRef<Map<string, SessionStatus>>(new Map())
-  useEffect(() => {
-    const prev = prevStatusRef.current
-    const next = new Map<string, SessionStatus>()
-    for (const s of sessions) {
-      next.set(s.sessionId, s.status)
-      const was = prev.get(s.sessionId)
-      if (
-        was !== s.status &&
-        (s.status === 'waiting' || s.status === 'done' || s.status === 'error')
-      ) {
-        playStatusSound(s.status, soundEnabled !== false)
-      }
-    }
-    prevStatusRef.current = next
-  }, [sessions, soundEnabled])
-
-  // 新审批到达：播放 waiting 音效（即便没有对应会话状态翻转）
-  const prevPendingCount = useRef(0)
-  useEffect(() => {
-    if (pending.length > prevPendingCount.current) {
-      playStatusSound('waiting', soundEnabled !== false)
-    }
-    prevPendingCount.current = pending.length
-  }, [pending.length, soundEnabled])
+  useIslandSound(sessions, pending, soundEnabled)
 
   const hasApproval = pending.length > 0
   const expanded = hasApproval || hovered
@@ -148,44 +90,16 @@ export function IslandRoot(): React.ReactElement {
 
   // 「已持续时长 / 相对时间」的秒级滚动不再靠这里强制整树重渲，改由各卡片内的叶子组件
   // 订阅共享时钟（lib/use-now）自行刷新——卡片本体可安心 memo，时间又能动。
+  const contentRef = useIslandResize({ expanded, hasApproval, sorted, pending, notchInfo })
 
-  // 内容尺寸 → 回传主进程调整窗口（审批/面板用测量高度，收起态用固定尺寸）。
-  // sorted/pending 每次推送都是新引用，会反复触发本 effect；多数情况目标尺寸不变，
-  // 故用 lastSizeRef 去重，跳过同尺寸的 IPC 回传，省掉无意义的 setBounds 抖动。
-  useLayoutEffect(() => {
-    const api = window.electronAPI
-    if (!api?.islandResize) return
-    // 收起态：几何由主进程的 collapsedBounds 决定（黑条贴刘海左侧），渲染端只发 expanded:false
-    if (!expanded) {
-      if (lastSizeRef.current?.mode === 'collapsed') return
-      lastSizeRef.current = { mode: 'collapsed', width: 0, height: 0 }
-      void api.islandResize({ expanded: false })
-      return
-    }
-    // 展开态：测量内容高度回传（含刘海占位 spacer），上限随刘海占位上浮
-    const el = contentRef.current
-    const width = hasApproval ? APPROVAL_WIDTH : PANEL_WIDTH
-    const maxExpandH = notchInfo?.hasNotch ? 640 + notchInfo.topInset : 640
-    const height = Math.max(48, Math.min(el ? Math.ceil(el.scrollHeight) : 200, maxExpandH))
-    const last = lastSizeRef.current
-    if (last && last.mode === 'expanded' && last.width === width && last.height === height) return
-    lastSizeRef.current = { mode: 'expanded', width, height }
-    void api.islandResize({ expanded: true, width, height })
-  }, [expanded, hasApproval, sorted, pending, notchInfo])
-
-  // 点击穿透：仅当岛真正可交互（hover 展开 或 有审批）时让窗口接收鼠标；否则忽略，
-  // 让 pill 两侧透明区域的点击穿透到菜单栏 / 下层应用（窗口侧 forward:true 仍转发
-  // move 事件，故穿透态下 pill 的 onMouseEnter 仍能触发以重新激活交互）。
-  useEffect(() => {
-    window.electronAPI?.islandSetMouseIgnore?.(!(hasApproval || hovered))
-  }, [hasApproval, hovered])
+  useMouseIgnore(expanded)
 
   // islandEnabled=false：理论上主进程不会创建窗口；但若设置后未重启，渲染空内容
   if (islandEnabled === false) {
     return <div className="island-root" />
   }
 
-  const label = collapsedLabel(counts, sessions.length)
+  const label = collapsedLabel(mostUrgent)
 
   return (
     <div
@@ -193,7 +107,10 @@ export function IslandRoot(): React.ReactElement {
       onMouseLeave={() => setHovered(false)}
     >
       <div className="island-content" ref={contentRef}>
-        {!expanded && (
+        {/* notchLoaded 落地前不渲染 pill：避免先按非刘海布局（CSS 默认值）渲染、IPC 结果
+            到位后几十毫秒再整体跳到刘海样式的可见跳动。非刘海机型 notchLoaded 变 true 后
+            notchInfo 仍是 null，走 CSS 默认值渲染，行为不变。 */}
+        {!expanded && notchLoaded && (
           <div
             className={'island-pill ' + (notchInfo?.hasNotch ? 'notch ' : '') + label.cls}
             onMouseEnter={() => setHovered(true)}
