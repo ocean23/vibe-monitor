@@ -252,13 +252,15 @@ body.island-body {
   flex-shrink: 0;
 }
 /* running 状态：路飞跑步小人（Lottie）替代蓝点。
-   盒子 40px > pill 高 34px：水平负 margin 收紧与文案间距；下方负 margin 让小人
-   略微「踩出」bar 下沿（窗口下方仍有 12px 空间，不会被裁），看起来像在 bar 上跑。 */
+   尺寸随 --notch-h 走（该屏实测菜单栏高，可能远小于旧写死的 38px），比黑条矮 6px 让
+   flex 居中后小人完整落在黑条内，不做「踩出下沿」的溢出——非刘海 fallback 窗口高度现在
+   等于黑条高度本身（无额外透明余量），溢出会被窗口边界裁切。水平负 margin 收紧与文案
+   间距（视觉分组更紧凑）。 */
 .island-pill-runner {
-  width: 40px;
-  height: 40px;
+  width: calc(var(--notch-h, 38px) - 6px);
+  height: calc(var(--notch-h, 38px) - 6px);
   flex-shrink: 0;
-  margin: 0 -8px -6px -6px;
+  margin: 0 -4px;
   pointer-events: none;
 }
 .island-pill-runner svg {
