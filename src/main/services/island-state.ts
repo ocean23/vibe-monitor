@@ -106,15 +106,24 @@ export function isTerminalStatus(
  * 状态迁移的统一守卫——所有「候选下一状态」都要经这里：已处于终态的会话拒绝任何变更，
  * 返回原状态；否则放行候选值。
  *
- * `applyEvent` 主链路（此前是唯一遗漏这道守卫的入口——SessionStart/UserPromptSubmit/
- * PreToolUse/Stop 等静态映射事件可以直接把已结束会话拉回 running）与 `notificationStatus`
- * 的分类结果，都在这里统一收口，不再各自零散判断（近三次相关 fix 的共同根因）。
+ * `applyEvent` 主链路（SessionStart/UserPromptSubmit/PreToolUse/Stop 等静态映射事件）与
+ * `notificationStatus` 的分类结果，都在这里统一收口，不再各自零散判断。
+ *
+ * 唯一例外：`UserPromptSubmit`。`Stop` 是「本轮结束」而非「会话结束」——同一 session_id 在
+ * 一次 Claude Code 交互式会话里会反复经历 Stop → 用户再发消息 → Stop → ...。PreToolUse/
+ * SessionStart/Notification 都可能是**上一轮的迟到噪声**（子进程收尾时序竞态），无法与「新
+ * 一轮」区分，继续挡是对的；但 UserPromptSubmit 是用户明确发起的新动作，不可能是迟到事件，
+ * 必须无条件解除终态锁——否则卡片从第二轮起永久卡在「完成」，看不出真实还在运行（曾在
+ * ab579f6 里被误一并纳入终态守卫，导致此问题）。
  */
 export function resolveTransition(
   prev: SessionState | undefined,
-  candidate: SessionStatus
+  candidate: SessionStatus,
+  kind?: IslandHookKind
 ): SessionStatus {
-  if (prev && isTerminalStatus(prev)) return prev.status
+  if (prev && isTerminalStatus(prev)) {
+    return kind === 'UserPromptSubmit' ? candidate : prev.status
+  }
   return candidate
 }
 
@@ -191,7 +200,7 @@ export class IslandState extends EventEmitter {
       void this.audit('island.event_unknown_kind', { kind: event.kind, sessionId })
       return
     }
-    const status = resolveTransition(prev, candidateStatus)
+    const status = resolveTransition(prev, candidateStatus, event.kind)
     const now = event.ts ?? this.now()
     const base: SessionStateBase = {
       sessionId,

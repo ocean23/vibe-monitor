@@ -114,10 +114,14 @@ describe('island-state', () => {
       expect(state.list()[0].status).toBe('done')
     })
 
-    it('UserPromptSubmit after Stop does not revive the session', () => {
+    it('UserPromptSubmit after Stop DOES revive the session (新一轮用户输入，非迟到事件)', () => {
+      // Stop 是「本轮结束」而非「会话结束」——同一 session_id 在一次 Claude Code 交互式会话里
+      // 会反复经历 Stop → 用户再发消息 → Stop → ...。UserPromptSubmit 是用户明确发起的新动作，
+      // 不可能是上一轮的迟到噪声，必须无条件解除终态锁，否则卡片从第二轮起永久卡在「完成」。
       state.applyEvent(evt({ kind: 'Stop' }))
-      state.applyEvent(evt({ kind: 'UserPromptSubmit' }))
       expect(state.list()[0].status).toBe('done')
+      state.applyEvent(evt({ kind: 'UserPromptSubmit' }))
+      expect(state.list()[0].status).toBe('running')
     })
 
     it('SessionStart after Stop does not revive the session', () => {
