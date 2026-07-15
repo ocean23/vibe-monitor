@@ -238,14 +238,19 @@ body.island-body {
   height: var(--bar-shoulder-h, 24px);
   background: var(--island-surface);
   pointer-events: none;
+  /* 过渡带（99%→100%）此前只有 1% 宽——半径本就只有 3×10px，1% 换算下来是零点几像素的
+     渐变带，浏览器没有空间做抗锯齿，圆弧被硬切成看得见的阶梯（用户反馈：中间有一点点没有
+     平滑的过渡；截图像素级放大确认边缘是台阶状而非平滑曲线）。加宽到 80%→100%，渐变带
+     变成 1-2 物理像素宽，给抗锯齿留出插值空间；轮廓形状本身不变（人眼看不出 80% 和 99%
+     的位置差别，只看得出边缘平不平滑）。 */
   -webkit-mask: radial-gradient(
     var(--bar-shoulder, 8px) var(--bar-shoulder-h, 24px) at bottom left,
-    transparent 99%,
+    transparent 80%,
     #000 100%
   );
   mask: radial-gradient(
     var(--bar-shoulder, 8px) var(--bar-shoulder-h, 24px) at bottom left,
-    transparent 99%,
+    transparent 80%,
     #000 100%
   );
 }
