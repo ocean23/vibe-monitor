@@ -7,6 +7,7 @@ import {
   resolveNotchInfo,
   collapsedBounds,
   expandedX,
+  localMenuBarHeight,
   NOTCH_COLLAPSED_WIDTH,
   type NotchInfo
 } from '../services/island-geometry'
@@ -101,7 +102,9 @@ export function createIslandWindowController(deps: IslandWindowDeps): IslandWind
       void deps.audit('island.notch_detect_failed', {})
     }
 
-    const menuBarH = notchDisplay.workArea.y
+    // 局部菜单栏高，不能直接用 workArea.y——外接屏设为主屏时内建屏在全局坐标系里会被推离
+    // 原点，workArea.y 会把这段排列偏移也算进去（见 localMenuBarHeight 注释，真实复现过）。
+    const menuBarH = localMenuBarHeight(notchDisplay)
     const info = resolveNotchInfo(jxa, menuBarH, notchDisplay.bounds.width)
     // JXA 未测到（jxa.w/h 均为 0）但启发式判定为刘海机型：走的是估算分支，留痕。
     if (!(jxa.w > 0 && jxa.h > 0) && info?.hasNotch) {
@@ -185,7 +188,7 @@ export function createIslandWindowController(deps: IslandWindowDeps): IslandWind
   return {
     getWindow: () => win,
     getNotchInfo: () => notchInfo,
-    getNotchTopInset: () => Math.max(notchInfo?.height ?? 0, getNotchDisplay().workArea.y),
+    getNotchTopInset: () => Math.max(notchInfo?.height ?? 0, localMenuBarHeight(getNotchDisplay())),
 
     detect: async () => {
       notchInfo = await detectNotchInfo()

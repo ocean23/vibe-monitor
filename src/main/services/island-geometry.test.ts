@@ -5,6 +5,7 @@ import {
   resolveNotchInfo,
   collapsedBounds,
   expandedX,
+  localMenuBarHeight,
   COLLAPSED_BAR_WIDTH,
   BAR_SHOULDER,
   RUNNER_FOOT_ROOM,
@@ -64,6 +65,28 @@ describe('pickNotchDisplay', () => {
       workArea: { x: 0, y: 25, width: 1920, height: 1055 }
     })
     expect(pickNotchDisplay([only])).toBe(only)
+  })
+})
+
+describe('localMenuBarHeight', () => {
+  it('equals workArea.y when the display sits at the global origin (single-display / notch display is primary)', () => {
+    const display = mkDisplay({
+      internal: true,
+      bounds: { x: 0, y: 0, width: 1512, height: 982 },
+      workArea: { x: 0, y: 38, width: 1512, height: 944 }
+    })
+    expect(localMenuBarHeight(display)).toBe(38)
+  })
+
+  it('subtracts the arrangement offset when an external display is set as primary (real repro: bounds.y=111, workArea.y=150)', () => {
+    // 真实复现：外接屏设为主屏，内建屏在全局坐标系里被推离原点到 bounds.y=111；
+    // workArea.y=150 里混进了这段排列偏移，局部菜单栏/刘海高其实只有 39。
+    const internal = mkDisplay({
+      internal: true,
+      bounds: { x: -1512, y: 111, width: 1512, height: 982 },
+      workArea: { x: -1512, y: 150, width: 1512, height: 944 }
+    })
+    expect(localMenuBarHeight(internal)).toBe(39)
   })
 })
 

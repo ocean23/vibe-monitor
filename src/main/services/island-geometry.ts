@@ -71,11 +71,29 @@ export function pickNotchDisplay(displays: Display[]): Display {
 }
 
 /**
- * 把 JXA 实测结果 + workArea.y 启发式解析为最终的 NotchInfo（纯函数，覆盖刘海机型 /
+ * 该屏「局部」菜单栏/刘海预留高度，与显示器在全局虚拟桌面坐标系中的排列位置无关。
+ *
+ * `workArea.y` 是全局坐标（原点由当前主屏 + 多屏排列方式决定），只有该屏 `bounds.y === 0`
+ * （排在全局原点）时才恰好等于「局部菜单栏高」。一旦把外接屏设为主屏（菜单栏显示在外接屏
+ * 上），内建屏在全局坐标里就会被推离原点，此时 `bounds.y` 本身就是几十/上百像素的排列偏
+ * 移——直接把 `workArea.y` 当局部高度用，会把这段偏移也一并算进刘海/菜单栏高度。
+ *
+ * 真实复现（用户反馈：外接显示器场景灵动岛变成远超正常尺寸的黑色方块）：内建屏
+ * `bounds.y=111`、`workArea.y=150`，真实局部高只有 39，此前代码直接用 150 当刘海高，
+ * 黑条与 CSS `--notch-h` 随之暴涨到 150px。用 `workArea.y - bounds.y` 才是与全局排列
+ * 无关的局部值。
+ */
+export function localMenuBarHeight(display: Display): number {
+  return display.workArea.y - display.bounds.y
+}
+
+/**
+ * 把 JXA 实测结果 + 局部菜单栏高启发式解析为最终的 NotchInfo（纯函数，覆盖刘海机型 /
  * 无刘海外接显示器 / JXA 失败兜底三条分支，测试不需要真的跑 osascript）。
  *
  * @param jxa JXA 脚本读到的 {宽, 高}；均为 0 表示未测到刘海辅助区（非刘海机型或 JXA 失败）
- * @param menuBarH 兜底：该屏 workArea.y（菜单栏预留高）
+ * @param menuBarH 兜底：该屏局部菜单栏预留高（见 {@link localMenuBarHeight}，调用方不可
+ *   直接传 `workArea.y`——多屏且该屏不在全局原点时会把排列偏移也算进去）
  * @param displayWidthPt 兜底估算刘海宽度用：该屏物理宽度（pt）
  */
 export function resolveNotchInfo(
