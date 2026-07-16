@@ -56,6 +56,12 @@ export const RUNNER_FOOT_ROOM = 12
  */
 export const NOTCH_COLLAPSED_WIDTH = COLLAPSED_BAR_WIDTH + BAR_SHOULDER + BAR_OVERLAP
 
+/** 灵动岛收起态尺寸（像素）兜底默认值：JXA/启发式检测彻底失败（非 darwin）时使用，也是
+ *  非刘海机型渲染端计算 shell 收起态目标宽度时的来源（见 island-ipc.ts 的 island:getNotchInfo）。
+ *  原先在 island-window.ts 里私有声明，这里统一成一份，避免两处各写一遍。 */
+export const DEFAULT_ISLAND_WIDTH = 520
+export const DEFAULT_ISLAND_HEIGHT = 46
+
 /**
  * 灵动岛锚定的「刘海所在显示器」——始终是内建屏（MacBook 本体），与谁是主屏无关。
  *

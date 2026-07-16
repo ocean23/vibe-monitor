@@ -9,14 +9,12 @@ import {
   expandedX,
   localMenuBarHeight,
   NOTCH_COLLAPSED_WIDTH,
+  DEFAULT_ISLAND_WIDTH,
+  DEFAULT_ISLAND_HEIGHT,
   type NotchInfo
 } from '../services/island-geometry'
 
 export type { NotchInfo } from '../services/island-geometry'
-
-/** 灵动岛收起态尺寸（像素）兜底默认值：JXA/启发式检测彻底失败（非 darwin）时使用。 */
-const DEFAULT_ISLAND_WIDTH = 520
-const DEFAULT_ISLAND_HEIGHT = 46
 
 export interface IslandWindowDeps {
   audit: AuditFn
