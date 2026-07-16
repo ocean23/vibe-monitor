@@ -7,7 +7,7 @@ import { IslandApprovalPanel } from '../components/IslandApprovalPanel'
 import { IslandRunner } from '../components/IslandRunner'
 import { useNotchInfo } from '../lib/use-notch-info'
 import { useIslandSound } from '../lib/use-island-sound'
-import { useIslandResize } from '../lib/use-island-resize'
+import { useIslandResize, ISLAND_SHELL_TRANSITION_MS } from '../lib/use-island-resize'
 import { useMouseIgnore } from '../lib/use-mouse-ignore'
 
 /** 排序：紧急度（waiting > error > running > done > idle）降序，同级按最近活跃倒序。 */
@@ -90,7 +90,13 @@ export function IslandRoot(): React.ReactElement {
 
   // 「已持续时长 / 相对时间」的秒级滚动不再靠这里强制整树重渲，改由各卡片内的叶子组件
   // 订阅共享时钟（lib/use-now）自行刷新——卡片本体可安心 memo，时间又能动。
-  const contentRef = useIslandResize({ expanded, hasApproval, sorted, pending, notchInfo })
+  const { contentRef, expandedWidth, expandedHeight } = useIslandResize({
+    expanded,
+    hasApproval,
+    sorted,
+    pending,
+    notchInfo
+  })
 
   useMouseIgnore(expanded)
 
@@ -103,67 +109,80 @@ export function IslandRoot(): React.ReactElement {
 
   return (
     <div
-      className={'island-root' + (expanded ? ' expanded' : ' collapsed')}
+      className={
+        'island-root' +
+        (expanded ? ' expanded' : ' collapsed') +
+        (notchInfo && !notchInfo.hasNotch ? ' no-notch' : '')
+      }
+      style={{ ['--island-shell-ms' as string]: `${ISLAND_SHELL_TRANSITION_MS}ms` }}
       onMouseLeave={() => setHovered(false)}
     >
-      <div className="island-content" ref={contentRef}>
+      <div
+        className="island-shell"
+        style={expanded ? { width: expandedWidth, height: expandedHeight } : undefined}
+      >
         {/* notchLoaded 落地前不渲染 pill：避免先按非刘海布局（CSS 默认值）渲染、IPC 结果
             到位后几十毫秒再整体跳到刘海样式的可见跳动。非刘海机型 notchLoaded 变 true 后
-            notchInfo 仍是 null，走 CSS 默认值渲染，行为不变。 */}
-        {!expanded && notchLoaded && (
-          <div
-            className={'island-pill ' + (notchInfo?.hasNotch ? 'notch ' : '') + label.cls}
-            onMouseEnter={() => setHovered(true)}
-          >
-            <span className="island-pill-status">
-              {label.cls === 'running' ? (
-                <IslandRunner />
-              ) : (
-                <span className="island-pill-dot" aria-hidden="true" />
-              )}
-              {/* 刘海黑条空间有限，省略文案标签，状态色足以传达信息 */}
-              {!notchInfo?.hasNotch && label.text && (
-                <span className="island-pill-label">{label.text}</span>
-              )}
-            </span>
-            <span className="island-pill-count">{sessions.length} sessions</span>
-          </div>
-        )}
-
-        {/* 展开态刘海占位：顶部透明区域（高=刘海高），让面板从刘海正下方弹出 */}
-        {expanded && notchInfo?.hasNotch && (
-          <div className="island-notch-spacer" aria-hidden="true" />
-        )}
-
-        {expanded && hasApproval && <IslandApprovalPanel request={pending[0]} />}
-
-        {expanded && !hasApproval && (
-          <div className="island-panel" onMouseEnter={() => setHovered(true)}>
-            <div className="island-panel-head">
-              <span className="island-panel-title">Claude</span>
-              <span className="island-panel-count">{sessions.length} sessions</span>
-            </div>
-            <div className="island-panel-list">
-              {sorted.length === 0 ? (
-                <div className="island-panel-empty">暂无活跃会话</div>
-              ) : (
-                sorted.map((s) => <IslandSessionCard key={s.sessionId} session={s} />)
-              )}
-            </div>
-            <div className="island-panel-footer">
-              <button
-                className={'island-toggle' + (trustAll ? ' on' : '')}
-                onClick={() => void saveSettings({ trustAll: !trustAll })}
-                title={trustAll ? '已跳过所有审批（点击关闭）' : '点击开启：跳过所有审批'}
-              >
-                <span className="island-toggle-track">
-                  <span className="island-toggle-thumb" />
-                </span>
-                <span className="island-toggle-label">跳过审批</span>
-              </button>
+            notchInfo 仍是 null，走 CSS 默认值渲染，行为不变。pill 常驻挂载（不再受 expanded
+            条件门控），展开时只是这一层淡出，好让它与展开层 crossfade。 */}
+        {notchLoaded && (
+          <div className={'island-pill-layer' + (expanded ? ' is-hidden' : '')}>
+            <div
+              className={'island-pill ' + (notchInfo?.hasNotch ? 'notch ' : '') + label.cls}
+              onMouseEnter={() => setHovered(true)}
+            >
+              <span className="island-pill-status">
+                {label.cls === 'running' ? (
+                  <IslandRunner />
+                ) : (
+                  <span className="island-pill-dot" aria-hidden="true" />
+                )}
+                {/* 刘海黑条空间有限，省略文案标签，状态色足以传达信息 */}
+                {!notchInfo?.hasNotch && label.text && (
+                  <span className="island-pill-label">{label.text}</span>
+                )}
+              </span>
+              <span className="island-pill-count">{sessions.length} sessions</span>
             </div>
           </div>
         )}
+
+        {/* 展开层同样常驻挂载（会话面板 / 审批面板视 hasApproval 二选一渲染，谁都不因
+            collapsed 而卸载），收起时整层淡出、与 pill 层 crossfade。 */}
+        <div className={'island-expanded-layer' + (expanded ? '' : ' is-hidden')} ref={contentRef}>
+          {/* 展开态刘海占位：顶部透明区域（高=刘海高），让面板从刘海正下方弹出 */}
+          {notchInfo?.hasNotch && <div className="island-notch-spacer" aria-hidden="true" />}
+
+          {hasApproval ? (
+            <IslandApprovalPanel request={pending[0]} />
+          ) : (
+            <div className="island-panel" onMouseEnter={() => setHovered(true)}>
+              <div className="island-panel-head">
+                <span className="island-panel-title">Claude</span>
+                <span className="island-panel-count">{sessions.length} sessions</span>
+              </div>
+              <div className="island-panel-list">
+                {sorted.length === 0 ? (
+                  <div className="island-panel-empty">暂无活跃会话</div>
+                ) : (
+                  sorted.map((s) => <IslandSessionCard key={s.sessionId} session={s} />)
+                )}
+              </div>
+              <div className="island-panel-footer">
+                <button
+                  className={'island-toggle' + (trustAll ? ' on' : '')}
+                  onClick={() => void saveSettings({ trustAll: !trustAll })}
+                  title={trustAll ? '已跳过所有审批（点击关闭）' : '点击开启：跳过所有审批'}
+                >
+                  <span className="island-toggle-track">
+                    <span className="island-toggle-thumb" />
+                  </span>
+                  <span className="island-toggle-label">跳过审批</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
