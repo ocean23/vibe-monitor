@@ -126,7 +126,7 @@ export function IslandRoot(): React.ReactElement {
             notchInfo 仍是 null，走 CSS 默认值渲染，行为不变。pill 常驻挂载（不再受 expanded
             条件门控），展开时只是这一层淡出，好让它与展开层 crossfade。 */}
         {notchLoaded && (
-          <div className={'island-pill-layer' + (expanded ? ' is-hidden' : '')}>
+          <div className={'island-pill-layer' + (expanded ? ' is-hidden' : '')} inert={expanded}>
             <div
               className={'island-pill ' + (notchInfo?.hasNotch ? 'notch ' : '') + label.cls}
               onMouseEnter={() => setHovered(true)}
@@ -148,8 +148,17 @@ export function IslandRoot(): React.ReactElement {
         )}
 
         {/* 展开层同样常驻挂载（会话面板 / 审批面板视 hasApproval 二选一渲染，谁都不因
-            collapsed 而卸载），收起时整层淡出、与 pill 层 crossfade。 */}
-        <div className={'island-expanded-layer' + (expanded ? '' : ' is-hidden')} ref={contentRef}>
+            collapsed 而卸载），收起时整层淡出、与 pill 层 crossfade。inert：is-hidden 只是
+            opacity:0，层内按钮仍可聚焦——若「跳过审批」按钮意外持有焦点，浏览器会自动把
+            .island-shell（overflow:hidden 的滚动容器）滚到能看见该按钮的位置，导致收起态
+            的 pill 层被顶出可视区（复现过：整条岛白屏，DOM/CSS 都正常，唯独
+            .island-shell.scrollTop 非 0）。inert 让隐藏层连同其后代一并不可聚焦、不可被
+            这种「聚焦自动滚动」选中，从根上避免。 */}
+        <div
+          className={'island-expanded-layer' + (expanded ? '' : ' is-hidden')}
+          ref={contentRef}
+          inert={!expanded}
+        >
           {/* 展开态刘海占位：顶部透明区域（高=刘海高），让面板从刘海正下方弹出 */}
           {notchInfo?.hasNotch && <div className="island-notch-spacer" aria-hidden="true" />}
 
