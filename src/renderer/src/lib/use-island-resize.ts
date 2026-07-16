@@ -52,12 +52,13 @@ export function useIslandResize(params: UseIslandResizeParams): UseIslandResizeR
 
   useLayoutEffect(() => {
     const api = window.electronAPI
-    if (collapseTimerRef.current !== null) {
-      clearTimeout(collapseTimerRef.current)
-      collapseTimerRef.current = null
-    }
 
     if (!expanded) {
+      // 已经在收起态（mode 已是 'collapsed'）时，本次重跑必然只是 sorted/pending/notchInfo
+      // 变化触发的（后台会话数据推送，收起态下也会持续发生），不是「刚从展开态切换过来」，
+      // 直接返回、不触碰计时器：若在此处也无条件 clearTimeout，会把上一次已排好、尚未触发
+      // 的收起定时器清掉且不重新调度（下面的 setTimeout 分支不会再执行到），导致收起 IPC
+      // 永久丢失、窗口再也收不回去。计时器只应在「重新展开」时被取消，见下方 expanded 分支。
       if (lastSizeRef.current?.mode === 'collapsed') return
       lastSizeRef.current = { mode: 'collapsed', width: 0, height: 0 }
       if (api?.islandResize) {
@@ -67,6 +68,12 @@ export function useIslandResize(params: UseIslandResizeParams): UseIslandResizeR
         }, ISLAND_SHELL_TRANSITION_MS)
       }
       return
+    }
+
+    // 展开态（含「重新 hover 打断收起」的情况）：先清掉还没触发的收起定时器，避免窗口被误收。
+    if (collapseTimerRef.current !== null) {
+      clearTimeout(collapseTimerRef.current)
+      collapseTimerRef.current = null
     }
 
     // 展开态：测量内容高度回传（含刘海占位 spacer），上限随刘海占位上浮
