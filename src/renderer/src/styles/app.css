@@ -158,7 +158,13 @@ body.island-body {
   height: 100%;
   display: flex;
   align-items: flex-start;
-  justify-content: center;
+  /* 刘海机型默认左对齐（原为 center）：新架构下窗口在 hover 触发瞬间就已瞬时扩到展开态
+     最终尺寸（见 use-island-resize.ts），可见的 .island-shell 在这个已经变大的透明窗口里
+     独立做宽高动画。若仍用 center，扩大后的窗口会把还很小的 shell 突然居中到窗口正中央，
+     造成侧向跳动；改左对齐后 shell 才能稳定贴在窗口左缘原地长大（与刘海机型「同左缘展开」
+     的既定设计一致，见 island-geometry.ts 的 expandedX 注释）。非刘海降级机型走
+     .no-notch，见下方规则。 */
+  justify-content: flex-start;
   -webkit-app-region: no-drag;
   /* 岛内深色浮层用自有配色，不继承白色内容区文字色 */
   color: #e8e8ea;
@@ -170,9 +176,46 @@ body.island-body {
      值（子元素自身的直接声明优先于祖先继承，与哪个后设置无关），JS 注入的真实值就永远
      生效不了。默认值唯一声明在 :root（见文件顶部），这里让它自然继承。 */
 }
+/* 非刘海降级机型：collapsedBounds/expandedX 两态都是「屏幕工作区居中」定位，窗口本身的
+   x 会重新居中而非共享左缘。这里让 shell 在窗口内也居中，两层居中互相抵消，视觉上仍是
+   「原地长大」而非侧移。 */
+.island-root.no-notch {
+  justify-content: center;
+}
 
-.island-content {
-  width: 100%;
+/* 灵动岛可见形状的唯一尺寸动画来源：宽高由 JS 算出的目标值驱动（展开态走行内样式，
+   收起态落回下面的 CSS 默认值），transition 时长通过行内样式变量 --island-shell-ms
+   注入（与 use-island-resize.ts 的 ISLAND_SHELL_TRANSITION_MS 保持同一个数字来源）。
+   overflow:hidden 让内部展开态内容（固定按最终宽度排版，见 .island-panel/.island-approval）
+   在 shell 还没长大到位时被裁切/逐步显现，而不是整段溢出。 */
+.island-shell {
+  position: relative;
+  overflow: hidden;
+  width: var(--bar-width, 520px);
+  height: var(--notch-h, 38px);
+  transition:
+    width var(--island-shell-ms, 220ms) cubic-bezier(0.32, 0.72, 0, 1),
+    height var(--island-shell-ms, 220ms) cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* pill 层与展开层：常驻挂载、绝对定位叠在一起，靠 opacity + 位移互相 crossfade——不再靠
+   React 条件渲染互斥替换 DOM 子树（那样没法过渡）。谁都不卸载，谁不可见就
+   pointer-events:none，避免拦截另一层的鼠标事件。 */
+.island-pill-layer,
+.island-expanded-layer {
+  position: absolute;
+  inset: 0;
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity var(--island-shell-ms, 220ms) cubic-bezier(0.32, 0.72, 0, 1),
+    transform var(--island-shell-ms, 220ms) cubic-bezier(0.32, 0.72, 0, 1);
+}
+.island-pill-layer.is-hidden,
+.island-expanded-layer.is-hidden {
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
 }
 
 /* ---- 展开态刘海占位 ---- */
@@ -335,6 +378,10 @@ body.island-body {
 
 /* ---- hover 聚合面板 ---- */
 .island-panel {
+  /* 固定按最终宽度排版（= use-island-resize.ts 的 PANEL_WIDTH 640 减去左右各 8px margin），
+     不随 shell 动画期间的中间宽度重排文字，由 shell 的 overflow:hidden 负责裁切/显现。
+     两处数字必须保持同步。 */
+  width: 624px;
   margin: 0 8px 8px;
   background: rgba(18, 18, 22, 0.96);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -580,6 +627,9 @@ body.island-body {
 
 /* ---- 审批面板 ---- */
 .island-approval {
+  /* 固定按最终宽度排版（= use-island-resize.ts 的 APPROVAL_WIDTH 560 减去左右各 8px margin）。
+     两处数字必须保持同步。 */
+  width: 544px;
   margin: 0 8px 8px;
   background: rgba(18, 18, 22, 0.97);
   border: 1px solid rgba(245, 158, 11, 0.35);
