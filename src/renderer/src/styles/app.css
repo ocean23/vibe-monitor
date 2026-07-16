@@ -237,7 +237,13 @@ body.island-body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  width: 100%;
+  /* 显式宽度（原为 100%，相对 .island-pill-layer——该层 inset:0 贴着 .island-shell 当前
+     动画中的宽度走）：收起时 pill 层从隐藏渐显（opacity 0→1）的同时，shell 也在从展开宽度
+     收缩到收起宽度，若 pill 自身宽度跟着 100% 连续变化，就会在「渐显」的同时看到内容跟着
+     宽度剧烈收缩重排——展开方向因为 pill 是渐隐（opacity 1→0）所以这个重排不可见，但收起
+     方向渐显时非常显眼，表现为一闪（用户反馈）。改成固定引用 --bar-width，pill 自身尺寸
+     全程不随 shell 动画变化，只有 opacity/位移在动。 */
+  width: var(--bar-width, 520px);
   height: var(--notch-h, 38px);
   margin: 0;
   padding: 0 16px;
@@ -255,7 +261,9 @@ body.island-body {
    刘海右下镜像（用户选定）。 */
 .island-pill.notch {
   position: relative;
-  width: calc(100% - var(--bar-shoulder, 8px));
+  /* 同上（见 .island-pill 的注释）：改成固定引用 --bar-width，不再相对 100% 父层宽度，
+     避免收起时 pill 渐显的同时还跟着 shell 收缩重排、闪一下。 */
+  width: calc(var(--bar-width, 191px) - var(--bar-shoulder, 8px));
   height: var(--notch-h, 38px);
   margin: 0 0 0 var(--bar-shoulder, 8px);
   /* 内容右侧让出 overlap（刘海背后）+ 间距，避免文字钻到刘海下被遮 */
