@@ -98,8 +98,20 @@ describe('island-ipc', () => {
         shoulder: 3,
         shoulderH: 10,
         topInset: 38,
-        barWidth: 160
+        barWidth: 191
       })
+    })
+
+    it('barWidth falls back to the default fallback width when hasNotch is false', async () => {
+      islandWindow.getNotchInfo.mockReturnValue({
+        hasNotch: false,
+        width: 0,
+        cornerRadius: 0,
+        height: 24
+      })
+      islandWindow.getNotchTopInset.mockReturnValue(24)
+      const out = (await handlers['island:getNotchInfo'](null)) as any
+      expect(out.barWidth).toBe(520)
     })
   })
 

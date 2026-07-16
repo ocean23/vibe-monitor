@@ -9,7 +9,8 @@ import {
   BAR_OVERLAP,
   BAR_SHOULDER,
   BAR_SHOULDER_H,
-  COLLAPSED_BAR_WIDTH
+  NOTCH_COLLAPSED_WIDTH,
+  DEFAULT_ISLAND_WIDTH
 } from '../services/island-geometry'
 
 const VALID_DECISIONS: ReadonlySet<string> = new Set<ApprovalDecision>([
@@ -93,7 +94,12 @@ export function registerIslandIpc(ipcMain: IpcMainHandleLike, deps: IslandIpcDep
       shoulder: BAR_SHOULDER, // 左上椭圆凹肩水平半径（= 左侧透明预留宽）
       shoulderH: BAR_SHOULDER_H, // 左上椭圆凹肩垂直半径（> 水平 → 更陡）
       topInset: deps.islandWindow.getNotchTopInset(), // 展开态面板上方透明占位
-      barWidth: COLLAPSED_BAR_WIDTH
+      // .island-shell 收起态目标宽度（px）：刘海机型=黑条整窗宽（含凹肩+刘海背后重叠）；
+      // 非刘海机型=收起态兜底宽度。渲染端用它设 --bar-width CSS 变量，让 shell 的宽度
+      // 有一个不依赖「窗口当前实际宽度」的显式来源（新架构下窗口会先于可见内容瞬时改尺寸，
+      // 见 use-island-resize.ts，若 shell 宽度还依赖 100% 相对窗口宽度，会跟着窗口瞬时跳变，
+      // 而不是随 CSS transition 平滑变化）。
+      barWidth: notchInfo.hasNotch ? NOTCH_COLLAPSED_WIDTH : DEFAULT_ISLAND_WIDTH
     }
   })
 
