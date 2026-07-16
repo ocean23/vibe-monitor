@@ -40,6 +40,7 @@ export function useNotchInfo(): NotchInfoState {
           root.style.setProperty('--bar-shoulder', `${info.shoulder}px`)
           root.style.setProperty('--bar-shoulder-h', `${info.shoulderH}px`)
           root.style.setProperty('--notch-topinset', `${info.topInset}px`)
+          root.style.setProperty('--bar-width', `${info.barWidth}px`)
         }
         setState({ info: info ?? null, loaded: true })
       })
